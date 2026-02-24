@@ -26,17 +26,15 @@ fn test_init_and_config() {
     let signer2 = Address::generate(&env);
     let signers = Vec::from_array(&env, [signer1.clone(), signer2.clone()]);
 
-    bridge
-        .init_contract(
-            &admin,
-            &agent_contract,
-            &payment_token,
-            &signers,
-            &1u32, // 1-of-2 for this test
-        )
-        .unwrap();
+    bridge.init_contract(
+        &admin,
+        &agent_contract,
+        &payment_token,
+        &signers,
+        &1u32, // 1-of-2 for this test
+    );
 
-    let cfg = bridge.get_signer_config();
+    let cfg = bridge.get_signer_config_view();
     assert!(cfg.is_some());
     let cfg = cfg.unwrap();
     assert_eq!(cfg.m_required, 1);
@@ -68,9 +66,7 @@ fn test_lock_and_bridge_and_fee_calculation() {
     let notional_value: i128 = 100_000;
     let target_chain: u32 = 1;
 
-    let bridge_id = bridge
-        .lock_and_bridge(&1u64, &owner, &target_chain, &notional_value)
-        .unwrap();
+    let bridge_id = bridge.lock_and_bridge(&1u64, &owner, &target_chain, &notional_value);
 
     assert_eq!(bridge_id, 1);
 

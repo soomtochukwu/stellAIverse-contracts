@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, vec, Address, Bytes, Env, IntoVal,
-    String, Symbol, Val, Vec,
+    contract, contracterror, contractimpl, contracttype, Address, Bytes, Env, IntoVal, Symbol,
+    Val, Vec,
 };
 
 #[derive(Clone)]
@@ -299,21 +299,9 @@ impl BridgeManager {
             .instance()
             .set(&DataKey::LockedAgent(agent_id), &true);
 
-        // Emit event with a simple payload hash for off-chain proof generation.
-        let payload = Self::build_bridge_payload(
-            &env,
-            bridge_id,
-            agent_id,
-            &owner,
-            0,
-            target_chain,
-            notional_value,
-        );
-        let payload_hash = env.crypto().sha256(&payload);
-
         env.events().publish(
             (Symbol::new(&env, "BridgeOutboundInitiated"),),
-            (bridge_id, agent_id, owner, target_chain, notional_value, fee, payload_hash),
+            (bridge_id, agent_id, owner, target_chain, notional_value, fee),
         );
 
         Ok(bridge_id)
@@ -550,7 +538,7 @@ impl BridgeManager {
             .unwrap_or(0)
     }
 
-    pub fn get_signer_config(env: Env) -> Option<SignerConfig> {
+    pub fn get_signer_config_view(env: Env) -> Option<SignerConfig> {
         env.storage().instance().get(&DataKey::SignerConfig)
     }
 
@@ -603,25 +591,6 @@ impl BridgeManager {
                 || req.status == BridgeStatus::InboundApproved)
     }
 
-    fn build_bridge_payload(
-        env: &Env,
-        bridge_id: u64,
-        agent_id: u64,
-        owner: &Address,
-        source_chain: u32,
-        target_chain: u32,
-        notional_value: i128,
-    ) -> Bytes {
-        // Simple concatenation into Bytes for hashing; not exposed on-chain.
-        let mut parts: Vec<Val> = Vec::new(env);
-        parts.push_back(bridge_id.into_val(env));
-        parts.push_back(agent_id.into_val(env));
-        parts.push_back(owner.into_val(env));
-        parts.push_back(source_chain.into_val(env));
-        parts.push_back(target_chain.into_val(env));
-        parts.push_back(notional_value.into_val(env));
-        env.serialize(&parts)
-    }
 }
 
 #[cfg(test)]
