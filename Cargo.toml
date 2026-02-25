@@ -9,6 +9,7 @@ members = [
     "contracts/faucet",
     "contracts/governance",
     "contracts/transaction-coordinator",
+    "contracts/metrics-aggregator",
     "lib",
     "shared",
 ]
