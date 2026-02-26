@@ -12,7 +12,7 @@ use stellai_lib::{
     errors::ContractError,
     storage_keys::{AGENT_COUNTER_KEY, APPROVED_MINTERS_KEY},
     types::{Agent, RoyaltyInfo},
-    validation, ADMIN_KEY, MAX_ROYALTY_FEE,
+    validation, ADMIN_KEY,
 };
 
 // ============================================================================
@@ -115,7 +115,7 @@ impl AgentNFT {
 
     /// Validate royalty fee is within acceptable bounds
     fn validate_royalty_fee(fee: u32) -> Result<(), ContractError> {
-        if fee > MAX_ROYALTY_FEE {
+        if fee > 2500 {
             return Err(ContractError::InvalidRoyaltyFee);
         }
         Ok(())

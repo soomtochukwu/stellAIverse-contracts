@@ -1,6 +1,8 @@
 #![no_std]
 
 mod atomic;
+mod payment_types;
+mod payments;
 mod storage;
 
 use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol, Val, Vec};
@@ -16,6 +18,8 @@ use stellai_lib::{
 };
 
 use atomic::MarketplaceAtomicSupport;
+use payment_types::PaymentRecord;
+use payments::{calculate_splits, execute_payment_routing, PaymentRoutingContext};
 use storage::*;
 
 #[contract]
@@ -35,6 +39,7 @@ impl Marketplace {
         env.storage()
             .instance()
             .set(&Symbol::new(&env, LISTING_COUNTER_KEY), &0u64);
+        storage::set_platform_fee(&env, 250);
     }
 
     /// Set a new admin
@@ -59,6 +64,27 @@ impl Marketplace {
         assert!(admin == current_admin, "Unauthorized");
 
         set_payment_token(&env, token);
+    }
+
+    /// Set the platform fee in basis points (max 50%).
+    pub fn set_platform_fee(env: Env, admin: Address, fee_bps: u32) {
+        admin.require_auth();
+        assert!(fee_bps <= 5000, "Platform fee cannot exceed 50%");
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Contract not initialized");
+        assert!(admin == current_admin, "Unauthorized");
+
+        storage::set_platform_fee(&env, fee_bps);
+        env.events()
+            .publish((Symbol::new(&env, "platform_fee_updated"),), (fee_bps,));
+    }
+
+    /// Get the configured platform fee.
+    pub fn get_platform_fee(env: Env) -> u32 {
+        storage::get_platform_fee(&env)
     }
 
     /// Create a new listing
@@ -165,21 +191,14 @@ impl Marketplace {
         // Process fee transition if active
         Self::process_fee_transition(env.clone());
 
-        // Calculate marketplace fee using dynamic pricing
-        let marketplace_fee_bps = Self::get_current_marketplace_fee(env.clone());
-        let marketplace_fee = (listing.price * marketplace_fee_bps as i128) / 10000;
-        let seller_amount = listing.price - marketplace_fee;
-
-        // Transfer payment
-        let token_client = token::Client::new(&env, &get_payment_token(&env));
-
-        // Transfer marketplace fee to contract
-        if marketplace_fee > 0 {
-            token_client.transfer(&buyer, &env.current_contract_address(), &marketplace_fee);
-        }
-
-        // Transfer remaining amount to seller
-        token_client.transfer(&buyer, &listing.seller, &seller_amount);
+        let platform_fee_bps = Self::get_platform_fee(env.clone());
+        Self::route_sale_payment(
+            &env,
+            listing.agent_id,
+            listing.price,
+            &buyer,
+            &listing.seller,
+        );
 
         // Mark listing as inactive
         listing.active = false;
@@ -187,8 +206,43 @@ impl Marketplace {
 
         env.events().publish(
             (Symbol::new(&env, "agent_sold"),),
-            (listing_id, listing.agent_id, buyer, marketplace_fee_bps),
+            (listing_id, listing.agent_id, buyer, platform_fee_bps),
         );
+    }
+
+    /// Helper to route payment for a completed sale.
+    fn route_sale_payment(
+        env: &Env,
+        agent_id: u64,
+        sale_price: i128,
+        buyer: &Address,
+        seller: &Address,
+    ) {
+        let mut royalty_recipients = Vec::new(env);
+        let mut royalty_rate = 0u32;
+
+        if let Some(info) = Marketplace::get_royalty(env.clone(), agent_id) {
+            royalty_rate = info.fee;
+            royalty_recipients.push_back((
+                info.recipient,
+                royalty_rate,
+                String::from_str(env, "creator"),
+            ));
+        }
+
+        let platform_fee_bps = Self::get_platform_fee(env.clone());
+        let context = PaymentRoutingContext {
+            agent_id,
+            transaction_id: env.ledger().sequence() as u64,
+            buyer: buyer.clone(),
+            seller: seller.clone(),
+            platform_address: env.current_contract_address(),
+            royalty_recipients,
+        };
+
+        let split = calculate_splits(env, sale_price, royalty_rate, platform_fee_bps, &context);
+        execute_payment_routing(env, split);
+        set_previous_owner(env, agent_id, seller);
     }
 
     /// Cancel a listing
@@ -229,6 +283,26 @@ impl Marketplace {
         env.storage().instance().get(&listing_key)
     }
 
+    /// Retrieve payment history for an agent (immutable audit trail).
+    pub fn get_payment_history(env: Env, agent_id: u64) -> Vec<PaymentRecord> {
+        if validation::validate_nonzero_id(agent_id).is_err() {
+            panic!("Invalid agent ID");
+        }
+
+        let mut history = Vec::new(&env);
+        let count = storage::get_payment_history_count(&env, agent_id);
+
+        for i in 0..count {
+            if let Some(payment_id) = storage::get_payment_history_entry(&env, agent_id, i) {
+                if let Some(record) = storage::get_payment_record(&env, payment_id) {
+                    history.push_back(record);
+                }
+            }
+        }
+
+        history
+    }
+
     /// Set royalty info for an agent
     pub fn set_royalty(env: Env, agent_id: u64, creator: Address, recipient: Address, fee: u32) {
         creator.require_auth();
@@ -236,9 +310,8 @@ impl Marketplace {
         if validation::validate_nonzero_id(agent_id).is_err() {
             panic!("Invalid agent ID");
         }
-        if fee > 10000 {
-            // 100% in basis points
-            panic!("Royalty fee exceeds maximum (100%)");
+        if fee > 2500 {
+            panic!("Royalty fee exceeds maximum (25%)");
         }
 
         let royalty_info = RoyaltyInfo { recipient, fee };
@@ -623,25 +696,14 @@ impl Marketplace {
         // Process fee transition if active
         Self::process_fee_transition(env.clone());
 
-        // Calculate dynamic marketplace fee
-        let marketplace_fee_bps = Self::get_current_marketplace_fee(env.clone());
-        let marketplace_fee = (listing.price * marketplace_fee_bps as i128) / 10000;
-        let seller_amount = listing.price - marketplace_fee;
-
-        // Transfer payment
-        let token_client = token::Client::new(&env, &get_payment_token(&env));
-
-        // Transfer marketplace fee to contract
-        if marketplace_fee > 0 {
-            token_client.transfer(
-                &approval.buyer,
-                &env.current_contract_address(),
-                &marketplace_fee,
-            );
-        }
-
-        // Transfer remaining amount to seller
-        token_client.transfer(&approval.buyer, &listing.seller, &seller_amount);
+        let platform_fee_bps = Self::get_platform_fee(env.clone());
+        Self::route_sale_payment(
+            &env,
+            listing.agent_id,
+            listing.price,
+            &approval.buyer,
+            &listing.seller,
+        );
 
         // Mark listing as inactive
         listing.active = false;
@@ -664,7 +726,7 @@ impl Marketplace {
 
         env.events().publish(
             (Symbol::new(&env, "SaleExecuted"),),
-            (approval_id, listing_id, approval.buyer, marketplace_fee_bps),
+            (approval_id, listing_id, approval.buyer, platform_fee_bps),
         );
     }
 
@@ -679,40 +741,13 @@ impl Marketplace {
         // Process the auction resolution
         if let Some(winner) = auction.highest_bidder.clone() {
             if auction.highest_bid >= auction.reserve_price {
-                // Calculate dynamic marketplace fee
-                let marketplace_fee_bps = Self::get_current_marketplace_fee(env.clone());
-                let marketplace_fee = (auction.highest_bid * marketplace_fee_bps as i128) / 10000;
-
-                let royalty_info = Marketplace::get_royalty(env.clone(), auction.agent_id)
-                    .expect("Royalty info not found");
-
-                let royalty =
-                    (((auction.highest_bid as u128) * (royalty_info.fee as u128)) / 10000) as i128;
-                let seller_amount = auction.highest_bid - royalty - marketplace_fee;
-
-                let token_client = token::Client::new(&env, &get_payment_token(&env));
-
-                // Transfer marketplace fee to contract
-                if marketplace_fee > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &env.current_contract_address(),
-                        &marketplace_fee,
-                    );
-                }
-
-                // Transfer royalty
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &royalty_info.recipient,
-                    &royalty,
-                );
-
-                // Transfer seller payout
-                token_client.transfer(
-                    &env.current_contract_address(),
+                let platform_fee_bps = Self::get_platform_fee(env.clone());
+                Self::route_sale_payment(
+                    &env,
+                    auction.agent_id,
+                    auction.highest_bid,
+                    &winner,
                     &auction.seller,
-                    &seller_amount,
                 );
 
                 // NOTE: NFT transfer logic should be added here
@@ -721,7 +756,7 @@ impl Marketplace {
 
                 env.events().publish(
                     (Symbol::new(&env, "AuctionWon"),),
-                    (auction_id, winner, auction.highest_bid, marketplace_fee_bps),
+                    (auction_id, winner, auction.highest_bid, platform_fee_bps),
                 );
             } else {
                 // Refund if reserve not met
@@ -1020,40 +1055,13 @@ impl Marketplace {
                 // Process fee transition if active
                 Self::process_fee_transition(env.clone());
 
-                // Calculate dynamic marketplace fee
-                let marketplace_fee_bps = Self::get_current_marketplace_fee(env.clone());
-                let marketplace_fee = (auction.highest_bid * marketplace_fee_bps as i128) / 10000;
-
-                let royalty_info = Marketplace::get_royalty(env.clone(), auction.agent_id)
-                    .expect("Royalty info not found");
-
-                let royalty =
-                    (((auction.highest_bid as u128) * (royalty_info.fee as u128)) / 10000) as i128;
-                let seller_amount = auction.highest_bid - royalty - marketplace_fee;
-
-                let token_client = token::Client::new(&env, &get_payment_token(&env));
-
-                // Transfer marketplace fee to contract
-                if marketplace_fee > 0 {
-                    token_client.transfer(
-                        &env.current_contract_address(),
-                        &env.current_contract_address(),
-                        &marketplace_fee,
-                    );
-                }
-
-                // Transfer royalty
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &royalty_info.recipient,
-                    &royalty,
-                );
-
-                // Transfer seller payout
-                token_client.transfer(
-                    &env.current_contract_address(),
+                let platform_fee_bps = Self::get_platform_fee(env.clone());
+                Self::route_sale_payment(
+                    &env,
+                    auction.agent_id,
+                    auction.highest_bid,
+                    &winner,
                     &auction.seller,
-                    &seller_amount,
                 );
 
                 // NOTE: NFT transfer logic should be added here
@@ -1062,7 +1070,7 @@ impl Marketplace {
 
                 env.events().publish(
                     (Symbol::new(&env, "AuctionWon"),),
-                    (auction_id, winner, auction.highest_bid, marketplace_fee_bps),
+                    (auction_id, winner, auction.highest_bid, platform_fee_bps),
                 );
             } else {
                 // Refund if reserve not met (English only)
