@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,3 +37,18 @@ jobs:
 
       - name: Build Contracts
         run: cargo build --release --target wasm32-unknown-unknown
+
+  formal_verification:
+    name: Formal Verification (Kani)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Kani Verifier
+        run: |
+          cargo install --locked kani-verifier
+          cargo kani setup
+
+      - name: Run Kani Proof Harnesses
+        working-directory: ./formal-verification
+        run: cargo kani
