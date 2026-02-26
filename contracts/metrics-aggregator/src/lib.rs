@@ -42,10 +42,8 @@ impl MetricsAggregator {
             .instance()
             .set(&Symbol::new(&env, SNAPSHOT_COUNTER_KEY), &0u64);
 
-        env.events().publish(
-            (Symbol::new(&env, "metrics_init"),),
-            (admin_addr,),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "metrics_init"),), (admin_addr,));
     }
 
     // ========================================================================
@@ -127,8 +125,7 @@ impl MetricsAggregator {
                 stats.total_spent = stats.total_spent.saturating_add(value);
             }
             UserActivityType::ParticipationScored => {
-                stats.participation_score =
-                    stats.participation_score.saturating_add(value as u32);
+                stats.participation_score = stats.participation_score.saturating_add(value as u32);
             }
         }
 
@@ -262,7 +259,11 @@ impl MetricsAggregator {
 
         // Truncate to limit
         let mut result: Vec<AgentRanking> = Vec::new(&env);
-        let take = if len < effective_limit { len } else { effective_limit };
+        let take = if len < effective_limit {
+            len
+        } else {
+            effective_limit
+        };
         for i in 0..take {
             if let Some(r) = rankings.get(i) {
                 result.push_back(r);
@@ -304,10 +305,8 @@ impl MetricsAggregator {
 
         storage::store_snapshot(&env, &snapshot);
 
-        env.events().publish(
-            (Symbol::new(&env, "snapshot_taken"),),
-            (snapshot_id,),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "snapshot_taken"),), (snapshot_id,));
 
         snapshot_id
     }
@@ -339,14 +338,10 @@ impl MetricsAggregator {
             if let Some(bucket) = get_bucket(&env, bid) {
                 let should_prune = match bucket.duration {
                     BucketDuration::Hourly => {
-                        before_timestamp
-                            .saturating_sub(bucket.timestamp)
-                            > RETENTION_HOURLY_SECONDS
+                        before_timestamp.saturating_sub(bucket.timestamp) > RETENTION_HOURLY_SECONDS
                     }
                     BucketDuration::Daily => {
-                        before_timestamp
-                            .saturating_sub(bucket.timestamp)
-                            > RETENTION_DAILY_SECONDS
+                        before_timestamp.saturating_sub(bucket.timestamp) > RETENTION_DAILY_SECONDS
                     }
                     BucketDuration::Monthly => false, // Never prune monthly
                 };

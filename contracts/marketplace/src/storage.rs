@@ -1,3 +1,4 @@
+use crate::payment_types::PaymentRecord;
 use soroban_sdk::{contracttype, Address, Env, String, Vec};
 
 #[derive(Clone)]
@@ -5,7 +6,13 @@ use soroban_sdk::{contracttype, Address, Env, String, Vec};
 pub enum DataKey {
     Admin,
     PaymentToken,
+    PlatformFeeBps,
     RoyaltyBps,
+    PreviousOwner(u64),
+    PaymentCounter,
+    PaymentRecord(u64),
+    PaymentHistoryCount(u64),
+    PaymentHistory(u64, u64), // (agent_id, history_index)
     Auction(u64),
     AuctionCounter,
     ApprovalConfig,
@@ -46,6 +53,22 @@ pub fn get_payment_token(env: &Env) -> Address {
         .unwrap()
 }
 
+pub fn set_platform_fee(env: &Env, bps: u32) {
+    env.storage().instance().set(&DataKey::PlatformFeeBps, &bps);
+}
+
+pub fn get_platform_fee(env: &Env) -> u32 {
+    if let Some(bps) = env
+        .storage()
+        .instance()
+        .get::<_, u32>(&DataKey::PlatformFeeBps)
+    {
+        bps
+    } else {
+        250 // default 2.5%
+    }
+}
+
 /* ---------------- ROYALTY ---------------- */
 
 #[allow(dead_code)]
@@ -56,6 +79,70 @@ pub fn set_royalty_bps(env: &Env, bps: u32) {
 #[allow(dead_code)]
 pub fn get_royalty_bps(env: &Env) -> u32 {
     env.storage().instance().get(&DataKey::RoyaltyBps).unwrap()
+}
+
+pub fn set_previous_owner(env: &Env, agent_id: u64, owner: &Address) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PreviousOwner(agent_id), owner);
+}
+
+pub fn get_previous_owner(env: &Env, agent_id: u64) -> Option<Address> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PreviousOwner(agent_id))
+}
+
+/* ---------------- PAYMENTS ---------------- */
+
+pub fn increment_payment_counter(env: &Env) -> u64 {
+    let counter: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::PaymentCounter)
+        .unwrap_or(0);
+    let updated = counter + 1;
+    env.storage()
+        .instance()
+        .set(&DataKey::PaymentCounter, &updated);
+    updated
+}
+
+pub fn set_payment_record(env: &Env, record: &PaymentRecord) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PaymentRecord(record.payment_id), record);
+}
+
+pub fn get_payment_record(env: &Env, payment_id: u64) -> Option<PaymentRecord> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PaymentRecord(payment_id))
+}
+
+pub fn add_payment_history(env: &Env, agent_id: u64, payment_id: u64) {
+    let index = get_payment_history_count(env, agent_id);
+    env.storage()
+        .instance()
+        .set(&DataKey::PaymentHistory(agent_id, index), &payment_id);
+}
+
+pub fn get_payment_history_count(env: &Env, agent_id: u64) -> u64 {
+    let mut count = 0;
+    while env
+        .storage()
+        .instance()
+        .has(&DataKey::PaymentHistory(agent_id, count))
+    {
+        count += 1;
+    }
+    count
+}
+
+pub fn get_payment_history_entry(env: &Env, agent_id: u64, index: u64) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::PaymentHistory(agent_id, index))
 }
 
 /* ---------------- AUCTION ---------------- */

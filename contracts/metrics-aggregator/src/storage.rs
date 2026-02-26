@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, Env, Symbol};
 
-use crate::types::{BucketDuration, MetricType, MetricsBucket, MetricSnapshot, OrderBy, UserStats};
+use crate::types::{BucketDuration, MetricSnapshot, MetricType, MetricsBucket, OrderBy, UserStats};
 
 // ============================================================================
 // STORAGE KEY CONSTANTS
@@ -35,9 +35,7 @@ pub fn get_counter(env: &Env, key: &str) -> u64 {
 
 pub fn increment_counter(env: &Env, key: &str) -> u64 {
     let next = get_counter(env, key).saturating_add(1);
-    env.storage()
-        .instance()
-        .set(&Symbol::new(env, key), &next);
+    env.storage().instance().set(&Symbol::new(env, key), &next);
     next
 }
 
@@ -185,10 +183,7 @@ pub fn get_agent_scoreboard(env: &Env, order_by: OrderBy) -> soroban_sdk::Vec<u6
 
 pub fn get_cumulative(env: &Env, metric_type: MetricType) -> i128 {
     let key = (Symbol::new(env, "mcum"), metric_type as u32);
-    env.storage()
-        .persistent()
-        .get::<_, i128>(&key)
-        .unwrap_or(0)
+    env.storage().persistent().get::<_, i128>(&key).unwrap_or(0)
 }
 
 pub fn add_cumulative(env: &Env, metric_type: MetricType, value: i128) {
