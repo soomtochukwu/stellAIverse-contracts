@@ -25,4 +25,6 @@ pub enum ContractError {
     OracleError = 15,
     RateLimitExceeded = 16,
     InvalidRoyaltyFee = 17,
+    MetadataTooLong = 18,
+    CapabilitiesExceeded = 19,
 }

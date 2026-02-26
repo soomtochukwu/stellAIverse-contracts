@@ -46,7 +46,7 @@ mod prop_tests {
                 expected_counter += 1;
 
                 // INVARIANT: Counter must match number of successful legacy mints
-                prop_assert_eq!(client.total_agents(), expected_counter);
+                prop_assert_eq!(client.total_agents().unwrap(), expected_counter);
             }
         }
 
@@ -103,5 +103,102 @@ mod prop_tests {
                 _ => panic!("Non-owner was able to initiate transfer or got wrong error"),
             }
         }
+    }
+
+    // --- Standard Unit Tests (Moving from lib.rs and adding more) ---
+
+    #[test]
+    fn test_get_agent_metadata() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+
+        let owner = Address::generate(&env);
+        client.add_approved_minter(&admin, &owner);
+
+        let metadata_cid = "QmTestMetadataCID456";
+        env.mock_all_auths();
+        mint_test_agent(&env, &client, &owner, 2, metadata_cid, 5);
+
+        // Test get_agent_metadata returns correct CID
+        let result = client.get_agent_metadata(&2);
+        assert_eq!(result, String::from_str(&env, metadata_cid));
+    }
+
+    #[test]
+    fn test_get_agent_evolution_level() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+
+        let owner = Address::generate(&env);
+        client.add_approved_minter(&admin, &owner);
+
+        let evolution_level = 7u32;
+        env.mock_all_auths();
+        mint_test_agent(&env, &client, &owner, 3, "QmEvolutionTest", evolution_level);
+
+        // Test get_agent_evolution_level returns correct level
+        let result = client.get_agent_evolution_level(&3);
+        assert_eq!(result, evolution_level);
+    }
+
+    #[test]
+    fn test_query_non_existent_agent() {
+        let env = Env::default();
+        let (client, _admin) = setup_contract(&env);
+
+        // Try to query a non-existent agent - should return AgentNotFound
+        let result = client.try_get_agent_owner(&999);
+        assert!(result.is_err());
+
+        let result = client.try_get_agent_metadata(&999);
+        assert!(result.is_err());
+
+        let result = client.try_get_agent_evolution_level(&999);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_query_zero_agent_id() {
+        let env = Env::default();
+        let (client, _admin) = setup_contract(&env);
+
+        // Query with agent_id = 0 should return InvalidAgentId
+        let result = client.try_get_agent_owner(&0);
+        assert!(result.is_err());
+
+        let result = client.try_get_agent_metadata(&0);
+        assert!(result.is_err());
+
+        let result = client.try_get_agent_evolution_level(&0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_capabilities_limit_error() {
+         let env = Env::default();
+         let (client, admin) = setup_contract(&env);
+         let owner = Address::generate(&env);
+         client.add_approved_minter(&admin, &owner);
+
+         // Max is usually 10 in these contracts
+         let mut caps = Vec::new(&env);
+         for _ in 0..15 {
+             caps.push_back(String::from_str(&env, "cap"));
+         }
+
+         env.mock_all_auths();
+         let result = client.try_mint_agent_legacy(
+             &owner,
+             &String::from_str(&env, "Name"),
+             &String::from_str(&env, "Hash"),
+             &caps,
+             &None,
+             &None
+         );
+
+         match result {
+             Err(Ok(ContractError::CapabilitiesExceeded)) => {},
+             _ => panic!("Should have failed with CapabilitiesExceeded, got {:?}", result),
+         }
     }
 }
