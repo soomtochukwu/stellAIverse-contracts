@@ -389,12 +389,44 @@ impl TransactionCoordinator {
         );
     }
 
-    /// Get transaction journal for audit
-    pub fn get_transaction_journal(env: Env, _transaction_id: u64) -> Vec<TransactionJournalEntry> {
-        let journal = Vec::new(&env);
+    /// Get transaction journal for audit.
+    ///
+    /// Iterates through stored journal entries for the given transaction.
+    /// Journal entries are keyed by (transaction_id, step_id) where step_id 0
+    /// is used for transaction-level events (created, completed, rolled_back).
+    pub fn get_transaction_journal(env: Env, transaction_id: u64) -> Vec<TransactionJournalEntry> {
+        let mut journal = Vec::new(&env);
 
-        // This is a simplified version - in practice, you'd iterate through stored journal entries
-        // For now, return empty vector as journal entries are stored but not easily queryable
+        let transaction: Option<AtomicTransaction> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Transaction(transaction_id));
+
+        if let Some(tx) = transaction {
+            // Step 0 is the transaction-level journal entry (created/completed)
+            if let Some(entry) = env
+                .storage()
+                .instance()
+                .get::<_, TransactionJournalEntry>(&DataKey::Journal(transaction_id, 0))
+            {
+                journal.push_back(entry);
+            }
+
+            // Iterate through step journal entries
+            for i in 0..tx.steps.len() {
+                let step: TransactionStep = tx.steps.get(i).unwrap();
+                if let Some(entry) =
+                    env.storage()
+                        .instance()
+                        .get::<_, TransactionJournalEntry>(&DataKey::Journal(
+                            transaction_id,
+                            step.step_id,
+                        ))
+                {
+                    journal.push_back(entry);
+                }
+            }
+        }
 
         journal
     }
