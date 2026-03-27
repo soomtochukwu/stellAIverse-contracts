@@ -201,4 +201,174 @@ mod prop_tests {
              _ => panic!("Should have failed with CapabilitiesExceeded, got {:?}", result),
          }
     }
+
+    // ── batch_mint tests (Issue #91) ─────────────────────────────────────────
+
+    fn make_mint_data(env: &Env, cid_suffix: &str) -> AgentMintData {
+        let owner = Address::generate(env);
+        let mut cid = std::string::String::from("QmBatchCid");
+        cid.push_str(cid_suffix);
+        AgentMintData {
+            owner,
+            name: String::from_str(env, "BatchAgent"),
+            model_hash: String::from_str(env, "hash"),
+            metadata_cid: String::from_str(env, &cid),
+            capabilities: Vec::new(env),
+            royalty: None,
+        }
+    }
+
+    #[test]
+    fn test_batch_mint_single_item() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        env.mock_all_auths();
+        client.add_approved_minter(&admin, &admin);
+
+        let mut agents = Vec::new(&env);
+        agents.push_back(make_mint_data(&env, "0"));
+
+        let ids = client.batch_mint(&admin, &agents).unwrap();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids.get(0).unwrap(), 1u64);
+        assert_eq!(client.total_agents(), 1u64);
+    }
+
+    #[test]
+    fn test_batch_mint_ten_agents() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        env.mock_all_auths();
+        client.add_approved_minter(&admin, &admin);
+
+        let suffixes = ["0","1","2","3","4","5","6","7","8","9"];
+        let mut agents = Vec::new(&env);
+        for s in &suffixes {
+            agents.push_back(make_mint_data(&env, s));
+        }
+
+        let ids = client.batch_mint(&admin, &agents).unwrap();
+        assert_eq!(ids.len(), 10);
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(id, (i as u64) + 1);
+        }
+        assert_eq!(client.total_agents(), 10u64);
+    }
+
+    #[test]
+    fn test_batch_mint_fifty_agents() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        env.mock_all_auths();
+        client.add_approved_minter(&admin, &admin);
+
+        let mut agents = Vec::new(&env);
+        for n in 0u32..50 {
+            let s = n.to_string();
+            agents.push_back(make_mint_data(&env, &s));
+        }
+
+        let ids = client.batch_mint(&admin, &agents).unwrap();
+        assert_eq!(ids.len(), 50);
+        assert_eq!(client.total_agents(), 50u64);
+    }
+
+    #[test]
+    fn test_batch_mint_empty_fails() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        env.mock_all_auths();
+        client.add_approved_minter(&admin, &admin);
+
+        let agents: Vec<AgentMintData> = Vec::new(&env);
+        let result = client.try_batch_mint(&admin, &agents);
+        match result {
+            Err(Ok(ContractError::InvalidInput)) => {}
+            _ => panic!("Expected InvalidInput for empty batch, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_batch_mint_exceeds_limit_fails() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        env.mock_all_auths();
+        client.add_approved_minter(&admin, &admin);
+
+        // 51 agents — one over the limit
+        let mut agents = Vec::new(&env);
+        for n in 0u32..51 {
+            let s = n.to_string();
+            agents.push_back(make_mint_data(&env, &s));
+        }
+
+        let result = client.try_batch_mint(&admin, &agents);
+        match result {
+            Err(Ok(ContractError::InvalidInput)) => {}
+            _ => panic!("Expected InvalidInput for oversized batch, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_batch_mint_duplicate_cid_within_batch_fails() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        env.mock_all_auths();
+        client.add_approved_minter(&admin, &admin);
+
+        let mut agents = Vec::new(&env);
+        // Two agents sharing the same metadata_cid
+        let a1 = make_mint_data(&env, "dup");
+        let mut a2 = make_mint_data(&env, "other");
+        a2.metadata_cid = a1.metadata_cid.clone();
+        agents.push_back(a1);
+        agents.push_back(a2);
+
+        let result = client.try_batch_mint(&admin, &agents);
+        match result {
+            Err(Ok(ContractError::InvalidInput)) => {}
+            _ => panic!("Expected InvalidInput for duplicate CID, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_batch_mint_counter_continues_after_previous_mints() {
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        env.mock_all_auths();
+        client.add_approved_minter(&admin, &admin);
+
+        // Mint one agent individually first
+        let owner = Address::generate(&env);
+        client.add_approved_minter(&admin, &owner);
+        mint_test_agent(&env, &client, &owner, 1, "QmIndividual", 0);
+        assert_eq!(client.total_agents(), 1u64);
+
+        // Now batch-mint 3 more
+        let mut agents = Vec::new(&env);
+        for s in &["10", "11", "12"] {
+            agents.push_back(make_mint_data(&env, s));
+        }
+
+        let ids = client.batch_mint(&admin, &agents).unwrap();
+        // Should start from 2 (counter was at 1)
+        assert_eq!(ids.get(0).unwrap(), 2u64);
+        assert_eq!(ids.get(2).unwrap(), 4u64);
+        assert_eq!(client.total_agents(), 4u64);
+    }
+
+    #[test]
+    fn test_batch_mint_non_admin_fails() {
+        let env = Env::default();
+        let (client, _admin) = setup_contract(&env);
+        env.mock_all_auths();
+
+        let stranger = Address::generate(&env);
+        let mut agents = Vec::new(&env);
+        agents.push_back(make_mint_data(&env, "stranger_cid"));
+
+        // stranger is not in approved_minters
+        let result = client.try_batch_mint(&stranger, &agents);
+        assert!(result.is_err(), "Non-minter should not be able to batch_mint");
+    }
 }
