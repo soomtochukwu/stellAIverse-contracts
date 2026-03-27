@@ -435,4 +435,138 @@ impl MetricsAggregator {
             set_bucket_index(env, metric_type, duration, aligned_ts, bucket_id);
         }
     }
+
+    // ========================================================================
+    // REPUTATION & FEEDBACK APIs
+    // ========================================================================
+
+    /// Submit feedback about an `agent_id`. Any caller may submit feedback;
+    /// the reporter must `require_auth`. Feedback is aggregated immediately
+    /// into a compact EWMA reputation score (denominator = 8).
+    pub fn submit_feedback(
+        env: Env,
+        reporter: Address,
+        agent_id: u64,
+        value: i128,
+        reason: ReputationReason,
+    ) -> u64 {
+        reporter.require_auth();
+        let now = env.ledger().timestamp();
+
+        let fb_id = increment_counter(&env, FEEDBACK_COUNTER_KEY);
+        let fb = Feedback {
+            feedback_id: fb_id,
+            reporter: reporter.clone(),
+            agent_id,
+            value,
+            reason,
+            timestamp: now,
+            resolved: false,
+            dispute_id: 0,
+        };
+
+        store_feedback(&env, &fb);
+        add_feedback_to_agent(&env, agent_id, fb_id);
+
+        // Update (or create) aggregated reputation using a simple EWMA:
+        // new = ((den-1) * old + value) / den, den=8
+        let den: i128 = 8;
+        let mut rep = get_reputation(&env, agent_id).unwrap_or(AgentReputation {
+            agent_id,
+            score: value,
+            count: 1,
+            last_updated: now,
+        });
+
+        if rep.count == 0 {
+            rep.score = value;
+            rep.count = 1;
+        } else {
+            let old = rep.score;
+            let next = (old.saturating_mul(den - 1).saturating_add(value)) / den;
+            rep.score = next;
+            rep.count = rep.count.saturating_add(1);
+            rep.last_updated = now;
+        }
+
+        store_reputation(&env, &rep);
+
+        env.events().publish((Symbol::new(&env, "feedback_submitted"),), (fb_id,));
+
+        fb_id
+    }
+
+    /// Retrieve current aggregated reputation for an agent (if any)
+    pub fn get_reputation(env: Env, agent_id: u64) -> Option<AgentReputation> {
+        get_reputation(&env, agent_id)
+    }
+
+    /// Submit a dispute about an existing feedback entry. Reporter must auth.
+    pub fn submit_dispute(env: Env, reporter: Address, feedback_id: u64) -> u64 {
+        reporter.require_auth();
+        let now = env.ledger().timestamp();
+        let did = increment_counter(&env, DISPUTE_COUNTER_KEY);
+        let dispute = Dispute {
+            dispute_id: did,
+            feedback_id,
+            reporter: reporter.clone(),
+            timestamp: now,
+            resolved: false,
+            outcome: false,
+        };
+
+        store_dispute(&env, &dispute);
+        env.events()
+            .publish((Symbol::new(&env, "dispute_submitted"),), (did,));
+        did
+    }
+
+    /// Resolve a dispute (admin-only). If `upheld` is true, the disputed
+    /// feedback is considered invalid and a penalty is applied to reputation.
+    pub fn resolve_dispute(env: Env, caller: Address, dispute_id: u64, upheld: bool) -> bool {
+        caller.require_auth();
+        Self::verify_admin(&env, &caller);
+
+        if let Some(mut d) = get_dispute(&env, dispute_id) {
+            if d.resolved {
+                return d.outcome;
+            }
+            d.resolved = true;
+            d.outcome = upheld;
+            store_dispute(&env, &d);
+
+            if upheld {
+                // Apply penalty: reduce agent reputation by feedback.value (clamped)
+                if let Some(mut fb) = get_feedback(&env, d.feedback_id) {
+                    if !fb.resolved {
+                        fb.resolved = true;
+                        fb.dispute_id = dispute_id;
+                        store_feedback(&env, &fb);
+
+                        if let Some(mut rep) = get_reputation(&env, fb.agent_id) {
+                            // Simple penalty: subtract half of the feedback value
+                            let penalty = fb.value / 2;
+                            rep.score = rep.score.saturating_sub(penalty);
+                            rep.last_updated = env.ledger().timestamp();
+                            store_reputation(&env, &rep);
+                        }
+                    }
+                }
+            } else {
+                // Not upheld: mark feedback resolved but no penalty
+                if let Some(mut fb) = get_feedback(&env, d.feedback_id) {
+                    if !fb.resolved {
+                        fb.resolved = true;
+                        fb.dispute_id = dispute_id;
+                        store_feedback(&env, &fb);
+                    }
+                }
+            }
+
+            env.events().publish((Symbol::new(&env, "dispute_resolved"),), (dispute_id, upheld));
+            return upheld;
+        }
+
+        false
+    }
 }
