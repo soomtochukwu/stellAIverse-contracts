@@ -266,144 +266,112 @@ impl PredictionMarket {
             None => panic!("no bet position"),
         };
 
-        // Store bet position
-        let mut pos = get_bet_position(&env, &bettor, market_id).unwrap_or(BetPosition {
-            bettor: bettor.clone(),
-            market_id,
-            outcome,
-            tokens: 0,
-            amount_paid: 0,
-        });
-        pos.tokens = pos
-            .tokens
-            .saturating_add(tokens_a.saturating_add(tokens_b) as u128);
-        pos.amount_paid = pos.amount_paid.saturating_add(amount);
-        store_bet_position(&env, &pos);
+        // Calculate winnings based on pool reserves
+        let winning_reserve = match m.resolved_outcome {
+            Outcome::A => m.outcome_a_reserve,
+            Outcome::B => m.outcome_b_reserve,
+            _ => return 0,
+        };
 
-        store_market(&env, &m);
+        let total_winning_tokens = winning_reserve;
+        let winnings = if total_winning_tokens > 0 {
+            pos.tokens
+                .saturating_mul(total_winning_tokens as u128)
+                .checked_div(1000000) // Adjust for precision
+                .unwrap_or(0) as i128
+        } else {
+            0
+        };
+
+        // Remove bet position after claiming
+        let key = (Symbol::new(&env, "pm_bet_pos"), bettor, market_id);
+        env.storage().persistent().remove(&key);
+
         env.events().publish(
-            (Symbol::new(&env, "bet_placed_amm"),),
-            (market_id, outcome as u32, tokens_a.saturating_add(tokens_b)),
+            (Symbol::new(&env, "winnings_claimed"),),
+            (market_id, winnings),
         );
-        tokens_a.saturating_add(tokens_b) as u128
+        winnings
     }
 
-    /// Claim winnings after market resolution
-    pub fn claim_winnings(env: Env, bettor: Address, market_id: u64) -> i128 {
+    pub fn place_bet(
+        env: Env,
+        bettor: Address,
+        market_id: u64,
+        outcome: Outcome,
+        amount: i128,
+    ) {
         bettor.require_auth();
-        let m = match get_market(&env, market_id) {
+        let mut m = match get_market(&env, market_id) {
+            Some(x) => x,
+            None => panic!("market not found"),
+        };
+        // simple routing: add amount to chosen outcome reserve
+        match outcome {
+            Outcome::A => m.outcome_a_reserve = m.outcome_a_reserve.saturating_add(amount),
+            Outcome::B => m.outcome_b_reserve = m.outcome_b_reserve.saturating_add(amount),
+            _ => panic!("invalid outcome"),
+        }
+        store_market(&env, &m);
+        env.events()
+            .publish((Symbol::new(&env, "bet_placed"),), (market_id,));
+    }
+
+    /// Create a new dispute for a market outcome
+    pub fn dispute_outcome(
+        env: Env,
+        challenger: Address,
+        market_id: u64,
+        bond: i128,
+        reason: String,
+    ) -> u64 {
+        challenger.require_auth();
+        let mut m = match get_market(&env, market_id) {
             Some(x) => x,
             None => panic!("market not found"),
         };
 
         if m.status != MarketStatus::Resolved {
-            panic!("market not resolved");
-            // Calculate winnings based on pool reserves
-            let winning_reserve = match m.resolved_outcome {
-                Outcome::A => m.outcome_a_reserve,
-                Outcome::B => m.outcome_b_reserve,
-                _ => return 0,
-            };
-
-            let total_winning_tokens = winning_reserve;
-            let winnings = if total_winning_tokens > 0 {
-                pos.tokens
-                    .saturating_mul(total_winning_tokens as u128)
-                    .checked_div(1000000) // Adjust for precision
-                    .unwrap_or(0) as i128
-            } else {
-                0
-            };
-
-            // Remove bet position after claiming
-            let key = (Symbol::new(&env, "pm_bet_pos"), bettor, market_id);
-            env.storage().persistent().remove(&key);
-
-            env.events().publish(
-                (Symbol::new(&env, "winnings_claimed"),),
-                (market_id, winnings),
-            );
-            winnings
+            panic!("market must be resolved to dispute");
         }
-
-        pub fn place_bet(
-            env: Env,
-            bettor: Address,
-            market_id: u64,
-            outcome: Outcome,
-            amount: i128,
-        ) {
-            bettor.require_auth();
-            let mut m = match get_market(&env, market_id) {
-                Some(x) => x,
-                None => panic!("market not found"),
-            };
-            // simple routing: add amount to chosen outcome reserve
-            match outcome {
-                Outcome::A => m.outcome_a_reserve = m.outcome_a_reserve.saturating_add(amount),
-                Outcome::B => m.outcome_b_reserve = m.outcome_b_reserve.saturating_add(amount),
-                _ => panic!("invalid outcome"),
-            }
-            store_market(&env, &m);
-            env.events()
-                .publish((Symbol::new(&env, "bet_placed"),), (market_id,));
-        }
-
-        /// Create a new dispute for a market outcome
-        pub fn dispute_outcome(
-            env: Env,
-            challenger: Address,
-            market_id: u64,
-            bond: i128,
-            reason: String,
-        ) -> u64 {
-            challenger.require_auth();
-            let mut m = match get_market(&env, market_id) {
-                Some(x) => x,
-                None => panic!("market not found"),
-            };
-
-            if m.status != MarketStatus::Resolved {
-                panic!("market must be resolved to dispute");
-            }
 
             // Create dispute
-            let dispute_id = increment_counter(&env, DISPUTE_COUNTER_KEY);
-            let dispute = Dispute {
-                dispute_id,
-                market_id,
-                challenger: challenger.clone(),
-                bond,
-                votes_for: 0,
-                votes_against: 0,
+        let dispute_id = increment_counter(&env, DISPUTE_COUNTER_KEY);
+        let dispute = Dispute {
+            dispute_id,
+            market_id,
+            challenger: challenger.clone(),
+            bond,
+            votes_for: 0,
+            votes_against: 0,
                 deadline: env.ledger().timestamp().saturating_add(7 * 24 * 60 * 60), // 7 days
-                reason: reason.clone(),
-            };
+            reason: reason.clone(),
+        };
 
-            store_dispute(&env, &dispute);
+        store_dispute(&env, &dispute);
 
-            // Update market status
-            m.status = MarketStatus::Disputed;
-            store_market(&env, &m);
+        // Update market status
+        m.status = MarketStatus::Disputed;
+        store_market(&env, &m);
 
             env.events().publish(
-                (Symbol::new(&env, "dispute_created"),),
-                (dispute_id, market_id),
-            );
-            dispute_id
+            (Symbol::new(&env, "dispute_created"),),
+            (dispute_id, market_id),
+        );
+        dispute_id
+    }
+
+    /// Vote on a dispute
+    pub fn vote_on_dispute(env: Env, voter: Address, dispute_id: u64, support: bool) {
+        voter.require_auth();
+        let mut dispute = match get_dispute(&env, dispute_id) {
+            Some(x) => x,
+            None => panic!("dispute not found"),
+        };
+
+        if env.ledger().timestamp() > dispute.deadline {
+            panic!("voting period ended");
         }
-
-        /// Vote on a dispute
-        pub fn vote_on_dispute(env: Env, voter: Address, dispute_id: u64, support: bool) {
-            voter.require_auth();
-            let mut dispute = match get_dispute(&env, dispute_id) {
-                Some(x) => x,
-                None => panic!("dispute not found"),
-            };
-
-            if env.ledger().timestamp() > dispute.deadline {
-                panic!("voting period ended");
-            }
 
             // In a real implementation, this would check voting power/staking
             // For now, each address gets 1 vote

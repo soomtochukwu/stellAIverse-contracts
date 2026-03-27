@@ -1,8 +1,14 @@
 #[cfg(test)]
 mod prop_tests {
+    extern crate alloc;
     use super::*;
-    use crate::{AgentNFT, AgentNFTClient, ContractError};
+    use crate::{AgentMintData, AgentNFT, AgentNFTClient, ContractError};
+    use soroban_sdk::testutils::Address as _;
+    // Import test utilities from the tests module in lib.rs
+    use super::tests::{mint_test_agent, setup_contract};
+    use alloc::string::ToString;
     use proptest::prelude::*;
+    use proptest::strategy;
     use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
 
     // --- Strategy Helpers ---
@@ -14,7 +20,7 @@ mod prop_tests {
     // Generates a vector of strings (capabilities) with length limits
     fn any_capabilities(
         env: &Env,
-    ) -> impl Strategy<Value = core::primitive::vec::Vec<std::string::String>> {
+    ) -> impl Strategy<Value = alloc::vec::Vec<alloc::string::String>> {
         prop::collection::vec(".*", 0..10)
     }
 
@@ -209,7 +215,7 @@ mod prop_tests {
 
     fn make_mint_data(env: &Env, cid_suffix: &str) -> AgentMintData {
         let owner = Address::generate(env);
-        let mut cid = std::string::String::from("QmBatchCid");
+        let mut cid = alloc::string::String::from("QmBatchCid");
         cid.push_str(cid_suffix);
         AgentMintData {
             owner,

@@ -1,4 +1,5 @@
 #![no_std]
+extern crate alloc;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 mod test;
 
@@ -853,7 +854,7 @@ impl AgentNFT {
 // Tests for Issue #6: Read-only agent query functions
 // ============================================================================
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env};
 
@@ -921,7 +922,7 @@ mod tests {
         client.add_approved_minter(&admin, &owner);
 
         // Mock too long string (over 256)
-        let mut long_str = std::string::String::new();
+        let mut long_str = alloc::string::String::new();
         for _ in 0..300 {
             long_str.push('a');
         }

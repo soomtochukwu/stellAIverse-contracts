@@ -1,4 +1,5 @@
 #![cfg(test)]
+extern crate alloc;
 
 use crate::{Oracle, OracleClient, RelayRequest};
 use ed25519_dalek::SigningKey;
@@ -45,7 +46,7 @@ fn build_signed_payload(
     };
 
     let scval: xdr::ScVal = req.try_into().unwrap();
-    let mut buf: std::vec::Vec<u8> = std::vec::Vec::new();
+    let mut buf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     scval
         .write_xdr(&mut Limited::new(&mut buf, Limits::none()))
         .unwrap();
