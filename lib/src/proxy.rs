@@ -9,7 +9,7 @@
 //!   - `IMPLEMENTATION_KEY` — current implementation address
 //!   - `IS_PAUSED_KEY`      — pause flag (bool) set during upgrade
 //!   - `UPGRADE_HISTORY_KEY`— Vec<(timestamp, new_impl)> audit trail
-//! The `ADMIN_KEY` is the same shared key used across all contracts.
+//!     The `ADMIN_KEY` is the same shared key used across all contracts.
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol, Val, Vec};
 
@@ -33,9 +33,7 @@ impl StellAIverseProxy {
         env.storage()
             .instance()
             .set(&IMPLEMENTATION_KEY, &initial_implementation);
-        env.storage()
-            .instance()
-            .set(&IS_PAUSED_KEY, &false);
+        env.storage().instance().set(&IS_PAUSED_KEY, &false);
         env.storage()
             .instance()
             .set(&UPGRADE_HISTORY_KEY, &Vec::<(u64, Address)>::new(&env));
@@ -72,9 +70,7 @@ impl StellAIverseProxy {
             .get(&UPGRADE_HISTORY_KEY)
             .unwrap_or_else(|| Vec::new(&env));
         history.push_back((env.ledger().timestamp(), new_implementation.clone()));
-        env.storage()
-            .instance()
-            .set(&UPGRADE_HISTORY_KEY, &history);
+        env.storage().instance().set(&UPGRADE_HISTORY_KEY, &history);
 
         // 4. Update implementation pointer
         env.storage()

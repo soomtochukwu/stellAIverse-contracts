@@ -512,7 +512,8 @@ impl AgentNFT {
 
     /// Get total agents minted
     pub fn total_agents(env: Env) -> Result<u64, ContractError> {
-        Ok(env.storage()
+        Ok(env
+            .storage()
             .instance()
             .get(&Symbol::new(&env, AGENT_COUNTER_KEY))
             .unwrap_or(0))
@@ -766,7 +767,11 @@ impl AgentNFT {
     }
 
     /// Check if agent can be transferred
-    pub fn can_transfer_agent(env: Env, agent_id: u64, caller: Address) -> Result<bool, ContractError> {
+    pub fn can_transfer_agent(
+        env: Env,
+        agent_id: u64,
+        caller: Address,
+    ) -> Result<bool, ContractError> {
         if agent_id == 0 {
             return Ok(false);
         }
@@ -903,7 +908,7 @@ mod tests {
     fn test_total_agents_returns_result() {
         let env = Env::default();
         let (client, _admin) = setup_contract(&env);
-        
+
         // Initial count should be 0
         assert_eq!(client.total_agents(), 0);
     }
@@ -923,17 +928,10 @@ mod tests {
         let metadata = String::from_str(&env, &long_str);
 
         env.mock_all_auths();
-        let result = client.try_mint_agent(
-            &5,
-            &owner,
-            &metadata,
-            &1,
-            &None,
-            &None
-        );
+        let result = client.try_mint_agent(&5, &owner, &metadata, &1, &None, &None);
 
         match result {
-            Err(Ok(ContractError::MetadataTooLong)) => {},
+            Err(Ok(ContractError::MetadataTooLong)) => {}
             _ => panic!("Should have failed with MetadataTooLong, got {:?}", result),
         }
     }

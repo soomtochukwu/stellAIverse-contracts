@@ -8,7 +8,7 @@ pub fn validate_address(address: &Address) -> Result<(), ContractError> {
 }
 
 pub fn validate_metadata(metadata: &String) -> Result<(), ContractError> {
-    if metadata.len() == 0 {
+    if metadata.is_empty() {
         return Err(ContractError::InvalidMetadata);
     }
     if metadata.len() > MAX_STRING_LENGTH {
@@ -24,7 +24,7 @@ pub fn validate_capabilities(capabilities: &Vec<String>) -> Result<(), ContractE
 
     for i in 0..capabilities.len() {
         let capability = capabilities.get(i).ok_or(ContractError::InvalidInput)?;
-        if capability.len() == 0 {
+        if capability.is_empty() {
             return Err(ContractError::InvalidMetadata); // Or a specific InvalidCapability if it existed
         }
         if capability.len() > MAX_STRING_LENGTH {

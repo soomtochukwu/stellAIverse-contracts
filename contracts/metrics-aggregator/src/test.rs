@@ -543,7 +543,12 @@ fn test_submit_feedback_updates_reputation() {
     env.mock_all_auths();
 
     // Submit feedback for agent 42 with value 100
-    let fb_id = client.submit_feedback(&reporter, &42u64, &100i128, &super::ReputationReason::Execution);
+    let fb_id = client.submit_feedback(
+        &reporter,
+        &42u64,
+        &100i128,
+        &super::ReputationReason::Execution,
+    );
     assert!(fb_id > 0);
 
     // Reputation should exist and be at least the submitted value
@@ -560,7 +565,12 @@ fn test_dispute_upheld_penalty() {
     // Reporter submits feedback
     let reporter = Address::generate(&env);
     env.mock_all_auths();
-    let fb_id = client.submit_feedback(&reporter, &7u64, &200i128, &super::ReputationReason::Marketplace);
+    let fb_id = client.submit_feedback(
+        &reporter,
+        &7u64,
+        &200i128,
+        &super::ReputationReason::Marketplace,
+    );
 
     // Admin submits dispute resolution (upheld)
     let d_id = client.submit_dispute(&reporter, &fb_id);

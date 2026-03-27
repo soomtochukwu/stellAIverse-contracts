@@ -49,7 +49,7 @@ mod tests {
 
         let admin = Address::generate(&env);
         let next = Address::generate(&env);
-        let contract_id = env.register_contract(None, AdminHarness);
+        let contract_id = env.register(AdminHarness, ());
 
         env.as_contract(&contract_id, || {
             env.storage()

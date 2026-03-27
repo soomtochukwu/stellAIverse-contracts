@@ -175,31 +175,34 @@ mod prop_tests {
 
     #[test]
     fn test_capabilities_limit_error() {
-         let env = Env::default();
-         let (client, admin) = setup_contract(&env);
-         let owner = Address::generate(&env);
-         client.add_approved_minter(&admin, &owner);
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        let owner = Address::generate(&env);
+        client.add_approved_minter(&admin, &owner);
 
-         // Max is usually 10 in these contracts
-         let mut caps = Vec::new(&env);
-         for _ in 0..15 {
-             caps.push_back(String::from_str(&env, "cap"));
-         }
+        // Max is usually 10 in these contracts
+        let mut caps = Vec::new(&env);
+        for _ in 0..15 {
+            caps.push_back(String::from_str(&env, "cap"));
+        }
 
-         env.mock_all_auths();
-         let result = client.try_mint_agent_legacy(
-             &owner,
-             &String::from_str(&env, "Name"),
-             &String::from_str(&env, "Hash"),
-             &caps,
-             &None,
-             &None
-         );
+        env.mock_all_auths();
+        let result = client.try_mint_agent_legacy(
+            &owner,
+            &String::from_str(&env, "Name"),
+            &String::from_str(&env, "Hash"),
+            &caps,
+            &None,
+            &None,
+        );
 
-         match result {
-             Err(Ok(ContractError::CapabilitiesExceeded)) => {},
-             _ => panic!("Should have failed with CapabilitiesExceeded, got {:?}", result),
-         }
+        match result {
+            Err(Ok(ContractError::CapabilitiesExceeded)) => {}
+            _ => panic!(
+                "Should have failed with CapabilitiesExceeded, got {:?}",
+                result
+            ),
+        }
     }
 
     // ── batch_mint tests (Issue #91) ─────────────────────────────────────────
@@ -241,7 +244,7 @@ mod prop_tests {
         env.mock_all_auths();
         client.add_approved_minter(&admin, &admin);
 
-        let suffixes = ["0","1","2","3","4","5","6","7","8","9"];
+        let suffixes = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
         let mut agents = Vec::new(&env);
         for s in &suffixes {
             agents.push_back(make_mint_data(&env, s));
@@ -305,7 +308,10 @@ mod prop_tests {
         let result = client.try_batch_mint(&admin, &agents);
         match result {
             Err(Ok(ContractError::InvalidInput)) => {}
-            _ => panic!("Expected InvalidInput for oversized batch, got {:?}", result),
+            _ => panic!(
+                "Expected InvalidInput for oversized batch, got {:?}",
+                result
+            ),
         }
     }
 
@@ -369,6 +375,9 @@ mod prop_tests {
 
         // stranger is not in approved_minters
         let result = client.try_batch_mint(&stranger, &agents);
-        assert!(result.is_err(), "Non-minter should not be able to batch_mint");
+        assert!(
+            result.is_err(),
+            "Non-minter should not be able to batch_mint"
+        );
     }
 }

@@ -46,11 +46,11 @@ pub struct AtomicTransactionUtils;
 impl AtomicTransactionUtils {
     /// Validate transaction structure and dependencies
     pub fn validate_transaction(transaction: &AtomicTransaction) -> Result<(), &'static str> {
-        if transaction.steps.len() == 0 {
+        if transaction.steps.is_empty() {
             return Err("Transaction must have at least one step");
         }
 
-        if transaction.steps.len() > crate::MAX_TRANSACTION_STEPS as u32 {
+        if transaction.steps.len() > crate::MAX_TRANSACTION_STEPS {
             return Err("Too many transaction steps");
         }
 
