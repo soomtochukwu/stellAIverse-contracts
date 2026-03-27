@@ -138,7 +138,10 @@ impl AgentToken {
         }
 
         env.events().publish(
-            (Symbol::new(&env, "agent_token"), AgentTokenEvent::TokenMinted),
+            (
+                Symbol::new(&env, "agent_token"),
+                AgentTokenEvent::TokenMinted,
+            ),
             (counter, owner),
         );
 
@@ -239,11 +242,7 @@ impl AgentToken {
     }
 
     /// Transfer admin rights.
-    pub fn transfer_admin(
-        env: Env,
-        current: Address,
-        next: Address,
-    ) -> Result<(), ContractError> {
+    pub fn transfer_admin(env: Env, current: Address, next: Address) -> Result<(), ContractError> {
         admin::transfer_admin(&env, &current, &next)
     }
 

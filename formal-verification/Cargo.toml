@@ -10,6 +10,7 @@ publish = false
 # Run `cargo kani` from this directory directly.
 
 [dependencies]
+kani = { version = "0.67.0", optional = true }
 
 [dev-dependencies]
 # Kani is installed as a standalone toolchain; no crate dependency needed.

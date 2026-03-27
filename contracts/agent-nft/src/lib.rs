@@ -1,4 +1,5 @@
 #![no_std]
+extern crate alloc;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 mod test;
 
@@ -512,7 +513,8 @@ impl AgentNFT {
 
     /// Get total agents minted
     pub fn total_agents(env: Env) -> Result<u64, ContractError> {
-        Ok(env.storage()
+        Ok(env
+            .storage()
             .instance()
             .get(&Symbol::new(&env, AGENT_COUNTER_KEY))
             .unwrap_or(0))
@@ -766,7 +768,11 @@ impl AgentNFT {
     }
 
     /// Check if agent can be transferred
-    pub fn can_transfer_agent(env: Env, agent_id: u64, caller: Address) -> Result<bool, ContractError> {
+    pub fn can_transfer_agent(
+        env: Env,
+        agent_id: u64,
+        caller: Address,
+    ) -> Result<bool, ContractError> {
         if agent_id == 0 {
             return Ok(false);
         }
@@ -848,7 +854,7 @@ impl AgentNFT {
 // Tests for Issue #6: Read-only agent query functions
 // ============================================================================
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env};
 
@@ -903,7 +909,7 @@ mod tests {
     fn test_total_agents_returns_result() {
         let env = Env::default();
         let (client, _admin) = setup_contract(&env);
-        
+
         // Initial count should be 0
         assert_eq!(client.total_agents(), 0);
     }
@@ -916,24 +922,17 @@ mod tests {
         client.add_approved_minter(&admin, &owner);
 
         // Mock too long string (over 256)
-        let mut long_str = std::string::String::new();
+        let mut long_str = alloc::string::String::new();
         for _ in 0..300 {
             long_str.push('a');
         }
         let metadata = String::from_str(&env, &long_str);
 
         env.mock_all_auths();
-        let result = client.try_mint_agent(
-            &5,
-            &owner,
-            &metadata,
-            &1,
-            &None,
-            &None
-        );
+        let result = client.try_mint_agent(&5, &owner, &metadata, &1, &None, &None);
 
         match result {
-            Err(Ok(ContractError::MetadataTooLong)) => {},
+            Err(Ok(ContractError::MetadataTooLong)) => {}
             _ => panic!("Should have failed with MetadataTooLong, got {:?}", result),
         }
     }

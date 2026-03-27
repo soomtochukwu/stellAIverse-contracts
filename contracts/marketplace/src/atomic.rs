@@ -1,6 +1,4 @@
-#![no_std]
-
-use soroban_sdk::{contracttype, Address, Env, String, Symbol, Val, Vec};
+use soroban_sdk::{contracttype, Env, String, Symbol, Val, Vec};
 
 use stellai_lib::atomic::AtomicTransactionSupport;
 

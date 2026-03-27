@@ -28,7 +28,6 @@ pub const MONTHLY_SECONDS: u64 = 2_592_000; // 30 days
 pub const FEEDBACK_COUNTER_KEY: &str = "fb_ctr";
 pub const DISPUTE_COUNTER_KEY: &str = "dispute_ctr";
 
-
 // ============================================================================
 // COUNTER HELPERS
 // ============================================================================

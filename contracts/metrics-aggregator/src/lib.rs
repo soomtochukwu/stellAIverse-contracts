@@ -491,7 +491,8 @@ impl MetricsAggregator {
 
         store_reputation(&env, &rep);
 
-        env.events().publish((Symbol::new(&env, "feedback_submitted"),), (fb_id,));
+        env.events()
+            .publish((Symbol::new(&env, "feedback_submitted"),), (fb_id,));
 
         fb_id
     }
@@ -563,7 +564,10 @@ impl MetricsAggregator {
                 }
             }
 
-            env.events().publish((Symbol::new(&env, "dispute_resolved"),), (dispute_id, upheld));
+            env.events().publish(
+                (Symbol::new(&env, "dispute_resolved"),),
+                (dispute_id, upheld),
+            );
             return upheld;
         }
 

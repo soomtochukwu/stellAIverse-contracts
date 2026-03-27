@@ -1,8 +1,14 @@
 #[cfg(test)]
 mod prop_tests {
+    extern crate alloc;
     use super::*;
-    use crate::{AgentNFT, AgentNFTClient, ContractError};
+    use crate::{AgentMintData, AgentNFT, AgentNFTClient, ContractError};
+    use soroban_sdk::testutils::Address as _;
+    // Import test utilities from the tests module in lib.rs
+    use super::tests::{mint_test_agent, setup_contract};
+    use alloc::string::ToString;
     use proptest::prelude::*;
+    use proptest::strategy;
     use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
 
     // --- Strategy Helpers ---
@@ -14,7 +20,7 @@ mod prop_tests {
     // Generates a vector of strings (capabilities) with length limits
     fn any_capabilities(
         env: &Env,
-    ) -> impl Strategy<Value = core::primitive::vec::Vec<std::string::String>> {
+    ) -> impl Strategy<Value = alloc::vec::Vec<alloc::string::String>> {
         prop::collection::vec(".*", 0..10)
     }
 
@@ -175,38 +181,41 @@ mod prop_tests {
 
     #[test]
     fn test_capabilities_limit_error() {
-         let env = Env::default();
-         let (client, admin) = setup_contract(&env);
-         let owner = Address::generate(&env);
-         client.add_approved_minter(&admin, &owner);
+        let env = Env::default();
+        let (client, admin) = setup_contract(&env);
+        let owner = Address::generate(&env);
+        client.add_approved_minter(&admin, &owner);
 
-         // Max is usually 10 in these contracts
-         let mut caps = Vec::new(&env);
-         for _ in 0..15 {
-             caps.push_back(String::from_str(&env, "cap"));
-         }
+        // Max is usually 10 in these contracts
+        let mut caps = Vec::new(&env);
+        for _ in 0..15 {
+            caps.push_back(String::from_str(&env, "cap"));
+        }
 
-         env.mock_all_auths();
-         let result = client.try_mint_agent_legacy(
-             &owner,
-             &String::from_str(&env, "Name"),
-             &String::from_str(&env, "Hash"),
-             &caps,
-             &None,
-             &None
-         );
+        env.mock_all_auths();
+        let result = client.try_mint_agent_legacy(
+            &owner,
+            &String::from_str(&env, "Name"),
+            &String::from_str(&env, "Hash"),
+            &caps,
+            &None,
+            &None,
+        );
 
-         match result {
-             Err(Ok(ContractError::CapabilitiesExceeded)) => {},
-             _ => panic!("Should have failed with CapabilitiesExceeded, got {:?}", result),
-         }
+        match result {
+            Err(Ok(ContractError::CapabilitiesExceeded)) => {}
+            _ => panic!(
+                "Should have failed with CapabilitiesExceeded, got {:?}",
+                result
+            ),
+        }
     }
 
     // ── batch_mint tests (Issue #91) ─────────────────────────────────────────
 
     fn make_mint_data(env: &Env, cid_suffix: &str) -> AgentMintData {
         let owner = Address::generate(env);
-        let mut cid = std::string::String::from("QmBatchCid");
+        let mut cid = alloc::string::String::from("QmBatchCid");
         cid.push_str(cid_suffix);
         AgentMintData {
             owner,
@@ -241,7 +250,7 @@ mod prop_tests {
         env.mock_all_auths();
         client.add_approved_minter(&admin, &admin);
 
-        let suffixes = ["0","1","2","3","4","5","6","7","8","9"];
+        let suffixes = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
         let mut agents = Vec::new(&env);
         for s in &suffixes {
             agents.push_back(make_mint_data(&env, s));
@@ -305,7 +314,10 @@ mod prop_tests {
         let result = client.try_batch_mint(&admin, &agents);
         match result {
             Err(Ok(ContractError::InvalidInput)) => {}
-            _ => panic!("Expected InvalidInput for oversized batch, got {:?}", result),
+            _ => panic!(
+                "Expected InvalidInput for oversized batch, got {:?}",
+                result
+            ),
         }
     }
 
@@ -369,6 +381,9 @@ mod prop_tests {
 
         // stranger is not in approved_minters
         let result = client.try_batch_mint(&stranger, &agents);
-        assert!(result.is_err(), "Non-minter should not be able to batch_mint");
+        assert!(
+            result.is_err(),
+            "Non-minter should not be able to batch_mint"
+        );
     }
 }
