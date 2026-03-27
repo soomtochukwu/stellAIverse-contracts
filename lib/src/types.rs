@@ -330,3 +330,241 @@ pub struct TransactionEvent {
     pub timestamp: u64,
     pub details: Option<String>,
 }
+
+/// DID Document structure following W3C DID specification
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct DIDDocument {
+    pub did: String,
+    pub controller: Address,
+    pub verification_methods: Vec<DIDVerificationMethod>,
+    pub authentication: Vec<String>,
+    pub assertion_method: Vec<String>,
+    pub key_agreement: Vec<String>,
+    pub capability_invocation: Vec<String>,
+    pub capability_delegation: Vec<String>,
+    pub service: Vec<DIDService>,
+    pub created: u64,
+    pub updated: u64,
+    pub version_id: u64,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct DIDVerificationMethod {
+    pub id: String,
+    pub type_: String,
+    pub controller: String,
+    pub public_key: Bytes,
+    pub created: u64,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct DIDService {
+    pub id: String,
+    pub type_: String,
+    pub service_endpoint: String,
+    pub created: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[contracttype]
+#[repr(u32)]
+pub enum DIDStatus {
+    Active = 0,
+    Suspended = 1,
+    Revoked = 2,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct DIDRecord {
+    pub document: DIDDocument,
+    pub status: DIDStatus,
+    pub nonce: u64,
+    pub last_activity: u64,
+}
+
+/// Verifiable Credential structure following W3C VC specification
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct VerifiableCredential {
+    pub id: String,
+    pub credential_id: u64,
+    pub issuer: Address,
+    pub subject: String,  // DID of the subject
+    pub credential_type: Vec<String>,
+    pub credential_schema: String,
+    pub credential_status: CredentialStatus,
+    pub issuance_date: u64,
+    pub expiration_date: Option<u64>,
+    pub credential_subject: Map<String, String>,
+    pub proof: Option<VCProof>,
+    pub non_revoked: bool,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct CredentialStatus {
+    pub id: String,
+    pub type_: String,
+    pub status: String,
+    pub revoked: bool,
+    pub suspended: bool,
+    pub revocation_reason: Option<String>,
+    pub suspension_reason: Option<String>,
+    pub effective_date: u64,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct VCProof {
+    pub type_: String,
+    pub created: u64,
+    pub proof_purpose: String,
+    pub verification_method: String,
+    pub challenge: Option<String>,
+    pub domain: Option<String>,
+    pub jws: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct CredentialSchema {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: Address,
+    pub fields: Vec<SchemaField>,
+    pub created_at: u64,
+    pub required_fields: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct SchemaField {
+    pub name: String,
+    pub type_: String,
+    pub required: bool,
+    pub description: Option<String>,
+    pub validation: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct SelectiveDisclosure {
+    pub disclosure_id: u64,
+    pub credential_id: u64,
+    pub verifier: Address,
+    pub subject: String,
+    pub disclosed_fields: Vec<String>,
+    pub nonce: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub presentation_hash: String,
+    pub verified: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+#[repr(u32)]
+pub enum CredentialType {
+    KYC = 0,
+    AML = 1,
+    Accreditation = 2,
+    Reputation = 3,
+    License = 4,
+    Education = 5,
+    Employment = 6,
+    Certification = 7,
+    AgeVerification = 8,
+    AddressVerification = 9,
+    IdentityVerification = 10,
+}
+
+/// Compliance integration types
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ComplianceReport {
+    pub report_id: u64,
+    pub entity_did: String,
+    pub compliance_type: ComplianceType,
+    pub status: ComplianceStatus,
+    pub score: u32,
+    pub risk_level: RiskLevel,
+    pub findings: Vec<ComplianceFinding>,
+    pub issued_by: Address,
+    pub issued_at: u64,
+    pub expires_at: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+#[repr(u32)]
+pub enum ComplianceType {
+    KYC = 0,
+    AML = 1,
+    Sanctions = 2,
+    TaxCompliance = 3,
+    DataPrivacy = 4,
+    FinancialRegulation = 5,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+#[repr(u32)]
+pub enum ComplianceStatus {
+    Compliant = 0,
+    NonCompliant = 1,
+    Pending = 2,
+    UnderReview = 3,
+    Exempt = 4,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[contracttype]
+#[repr(u32)]
+pub enum RiskLevel {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    Critical = 3,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ComplianceFinding {
+    pub category: String,
+    pub severity: String,
+    pub description: String,
+    pub recommendation: Option<String>,
+}
+
+/// Reputation integration types
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ReputationScore {
+    pub entity_did: String,
+    pub overall_score: u32,
+    pub category_scores: Map<String, u32>,
+    pub review_count: u32,
+    pub last_updated: u64,
+    pub calculation_method: String,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub struct ReputationReview {
+    pub review_id: u64,
+    pub reviewer_did: String,
+    pub subject_did: String,
+    pub rating: u32,  // 1-5 stars
+    pub category: String,
+    pub comment: Option<String>,
+    pub evidence: Vec<String>,  // Credential IDs as evidence
+    pub created_at: u64,
+    pub verified: bool,
+}

@@ -12,6 +12,9 @@ members = [
     "contracts/bridge-manager",
     "contracts/metrics-aggregator",
     "contracts/prediction-market",
+    "contracts/identity-did",
+    "contracts/verifiable-credentials",
+    "contracts/compliance-integration",
     "lib",
     "shared",
 ]
