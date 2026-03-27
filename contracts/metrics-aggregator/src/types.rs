@@ -158,3 +158,57 @@ pub struct PlatformSummary {
     pub total_evolution_completed: i128,
     pub total_governance_proposals: i128,
 }
+
+// ============================================================================
+// REPUTATION TYPES
+// ============================================================================
+
+/// Reason or category for a feedback or dispute (lightweight)
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum ReputationReason {
+    Execution = 0,
+    Marketplace = 1,
+    Governance = 2,
+    Other = 255,
+}
+
+/// Compact feedback record submitted about an agent
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Feedback {
+    pub feedback_id: u64,
+    pub reporter: Address,
+    pub agent_id: u64,
+    pub value: i128,
+    pub reason: ReputationReason,
+    pub timestamp: u64,
+    pub resolved: bool,
+    pub dispute_id: u64, // 0 for none
+}
+
+/// On-chain aggregated reputation entry for an agent
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AgentReputation {
+    pub agent_id: u64,
+    /// Current EWMA-style reputation score
+    pub score: i128,
+    /// Number of feedback samples aggregated
+    pub count: u64,
+    /// Last updated ledger timestamp
+    pub last_updated: u64,
+}
+
+/// Dispute about a feedback entry
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Dispute {
+    pub dispute_id: u64,
+    pub feedback_id: u64,
+    pub reporter: Address,
+    pub timestamp: u64,
+    pub resolved: bool,
+    pub outcome: bool, // true = dispute upheld (feedback invalid)
+}

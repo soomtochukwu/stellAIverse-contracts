@@ -22,6 +22,13 @@ pub const HOURLY_SECONDS: u64 = 3600;
 pub const DAILY_SECONDS: u64 = 86400;
 pub const MONTHLY_SECONDS: u64 = 2_592_000; // 30 days
 
+// ---------------------------------------------------------------------------
+// Reputation keys & counters
+// ---------------------------------------------------------------------------
+pub const FEEDBACK_COUNTER_KEY: &str = "fb_ctr";
+pub const DISPUTE_COUNTER_KEY: &str = "dispute_ctr";
+
+
 // ============================================================================
 // COUNTER HELPERS
 // ============================================================================
@@ -175,6 +182,66 @@ pub fn get_agent_scoreboard(env: &Env, order_by: OrderBy) -> soroban_sdk::Vec<u6
         .persistent()
         .get(&list_key)
         .unwrap_or_else(|| soroban_sdk::Vec::new(env))
+}
+
+// ============================================================================
+// REPUTATION & FEEDBACK STORAGE
+// ============================================================================
+
+pub fn store_reputation(env: &Env, rep: &crate::types::AgentReputation) {
+    let key = (Symbol::new(env, "rep"), rep.agent_id);
+    env.storage().persistent().set(&key, rep);
+}
+
+pub fn get_reputation(env: &Env, agent_id: u64) -> Option<crate::types::AgentReputation> {
+    let key = (Symbol::new(env, "rep"), agent_id);
+    env.storage().persistent().get(&key)
+}
+
+pub fn store_feedback(env: &Env, fb: &crate::types::Feedback) {
+    let key = (Symbol::new(env, "fb"), fb.feedback_id);
+    env.storage().persistent().set(&key, fb);
+}
+
+pub fn get_feedback(env: &Env, feedback_id: u64) -> Option<crate::types::Feedback> {
+    let key = (Symbol::new(env, "fb"), feedback_id);
+    env.storage().persistent().get(&key)
+}
+
+pub fn add_feedback_to_agent(env: &Env, agent_id: u64, feedback_id: u64) {
+    let list_key = (Symbol::new(env, "fb_list"), agent_id);
+    let mut list: soroban_sdk::Vec<u64> = env
+        .storage()
+        .persistent()
+        .get(&list_key)
+        .unwrap_or_else(|| soroban_sdk::Vec::new(env));
+
+    // Avoid duplicates
+    for i in 0..list.len() {
+        if list.get(i) == Some(feedback_id) {
+            return;
+        }
+    }
+    list.push_back(feedback_id);
+    env.storage().persistent().set(&list_key, &list);
+}
+
+pub fn get_feedback_ids_for_agent(env: &Env, agent_id: u64) -> soroban_sdk::Vec<u64> {
+    let list_key = (Symbol::new(env, "fb_list"), agent_id);
+    env.storage()
+        .persistent()
+        .get(&list_key)
+        .unwrap_or_else(|| soroban_sdk::Vec::new(env))
+}
+
+pub fn store_dispute(env: &Env, d: &crate::types::Dispute) {
+    let key = (Symbol::new(env, "dispute"), d.dispute_id);
+    env.storage().persistent().set(&key, d);
+}
+
+pub fn get_dispute(env: &Env, dispute_id: u64) -> Option<crate::types::Dispute> {
+    let key = (Symbol::new(env, "dispute"), dispute_id);
+    env.storage().persistent().get(&key)
 }
 
 // ============================================================================

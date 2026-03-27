@@ -11,7 +11,7 @@ fn setup() -> (Env, Address, MetricsAggregatorClient<'static>) {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
-    let contract_id = env.register(MetricsAggregator, &());
+    let contract_id = env.register(MetricsAggregator, ());
     let client = MetricsAggregatorClient::new(&env, &contract_id);
     client.init_contract(&admin);
     (env, admin, client)
@@ -528,4 +528,46 @@ fn test_cumulative_saturation() {
     let summary = client.get_platform_summary();
     // Should not overflow — saturating_add caps at MAX
     assert!(summary.total_agents_minted > 0);
+}
+
+// ============================================================================
+// REPUTATION TESTS
+// ============================================================================
+
+#[test]
+fn test_submit_feedback_updates_reputation() {
+    let (env, _admin, client) = setup();
+
+    // Reporter is an external user
+    let reporter = Address::generate(&env);
+    env.mock_all_auths();
+
+    // Submit feedback for agent 42 with value 100
+    let fb_id = client.submit_feedback(&reporter, &42u64, &100i128, &super::ReputationReason::Execution);
+    assert!(fb_id > 0);
+
+    // Reputation should exist and be at least the submitted value
+    let rep = client.get_reputation(&42u64).unwrap();
+    assert_eq!(rep.agent_id, 42u64);
+    assert!(rep.score >= 100 - 1); // allow small integer rounding
+    assert!(rep.count >= 1);
+}
+
+#[test]
+fn test_dispute_upheld_penalty() {
+    let (env, admin, client) = setup();
+
+    // Reporter submits feedback
+    let reporter = Address::generate(&env);
+    env.mock_all_auths();
+    let fb_id = client.submit_feedback(&reporter, &7u64, &200i128, &super::ReputationReason::Marketplace);
+
+    // Admin submits dispute resolution (upheld)
+    let d_id = client.submit_dispute(&reporter, &fb_id);
+    let upheld = client.resolve_dispute(&admin, &d_id, &true);
+    assert!(upheld);
+
+    // Reputation should have been penalized (score reduced)
+    let rep = client.get_reputation(&7u64).unwrap();
+    assert!(rep.score < 200);
 }
