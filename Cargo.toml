@@ -11,6 +11,7 @@ members = [
     "contracts/transaction-coordinator",
     "contracts/bridge-manager",
     "contracts/metrics-aggregator",
+    "contracts/prediction-market",
     "lib",
     "shared",
 ]
