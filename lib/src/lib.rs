@@ -4,6 +4,7 @@ pub mod atomic;
 pub mod audit;
 pub mod audit_helpers;
 pub mod errors;
+pub mod proxy;
 pub mod storage_keys;
 pub mod types;
 pub mod validation;
