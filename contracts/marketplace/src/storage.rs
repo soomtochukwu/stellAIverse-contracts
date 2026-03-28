@@ -26,6 +26,14 @@ pub enum DataKey {
     OracleSubscriptions,
     LastOracleUpdate,
     FeeTransitionState,
+    LeaseConfig,
+    LeaseCounter,
+    Lease(u64),
+    ExtensionCounter,
+    LeaseExtension(u64),
+    LesseeLeases(Address, u64),
+    LessorLeases(Address, u64),
+    LeaseHistory(u64, u64),
 }
 
 /* ---------------- ADMIN ---------------- */
@@ -421,4 +429,180 @@ pub fn set_fee_transition_state(env: &Env, state: &FeeTransitionState) {
 
 pub fn get_fee_transition_state(env: &Env) -> Option<FeeTransitionState> {
     env.storage().instance().get(&DataKey::FeeTransitionState)
+}
+
+/* ---------------- LEASE CONFIGURATION ---------------- */
+
+#[derive(Clone)]
+#[contracttype]
+pub struct LeaseConfig {
+    pub deposit_bps: u32,
+    pub early_termination_penalty_bps: u32,
+}
+
+pub fn set_lease_config(env: &Env, config: &LeaseConfig) {
+    env.storage().instance().set(&DataKey::LeaseConfig, config);
+}
+
+pub fn get_lease_config(env: &Env) -> LeaseConfig {
+    env.storage()
+        .instance()
+        .get(&DataKey::LeaseConfig)
+        .unwrap_or_else(|| LeaseConfig {
+            deposit_bps: stellai_lib::DEFAULT_LEASE_DEPOSIT_BPS,
+            early_termination_penalty_bps: stellai_lib::DEFAULT_EARLY_TERMINATION_PENALTY_BPS,
+        })
+}
+
+/* ---------------- LEASE MANAGEMENT ---------------- */
+
+pub fn increment_lease_counter(env: &Env) -> u64 {
+    let counter: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::LeaseCounter)
+        .unwrap_or(0);
+    let updated = counter + 1;
+    env.storage()
+        .instance()
+        .set(&DataKey::LeaseCounter, &updated);
+    updated
+}
+
+pub fn get_lease_counter(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::LeaseCounter)
+        .unwrap_or(0)
+}
+
+pub fn set_lease(env: &Env, lease: &stellai_lib::LeaseData) {
+    env.storage()
+        .instance()
+        .set(&DataKey::Lease(lease.lease_id), lease);
+}
+
+pub fn get_lease(env: &Env, lease_id: u64) -> Option<stellai_lib::LeaseData> {
+    env.storage().instance().get(&DataKey::Lease(lease_id))
+}
+
+pub fn increment_extension_counter(env: &Env) -> u64 {
+    let counter: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::ExtensionCounter)
+        .unwrap_or(0);
+    let updated = counter + 1;
+    env.storage()
+        .instance()
+        .set(&DataKey::ExtensionCounter, &updated);
+    updated
+}
+
+pub fn set_lease_extension(env: &Env, extension: &stellai_lib::LeaseExtensionRequest) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LeaseExtension(extension.extension_id), extension);
+}
+
+pub fn get_lease_extension(
+    env: &Env,
+    extension_id: u64,
+) -> Option<stellai_lib::LeaseExtensionRequest> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LeaseExtension(extension_id))
+}
+
+pub fn lessee_leases_append(env: &Env, lessee: &Address, lease_id: u64) {
+    let mut count = 0;
+    while env
+        .storage()
+        .instance()
+        .has(&DataKey::LesseeLeases(lessee.clone(), count))
+    {
+        count += 1;
+    }
+    env.storage()
+        .instance()
+        .set(&DataKey::LesseeLeases(lessee.clone(), count), &lease_id);
+}
+
+pub fn lessor_leases_append(env: &Env, lessor: &Address, lease_id: u64) {
+    let mut count = 0;
+    while env
+        .storage()
+        .instance()
+        .has(&DataKey::LessorLeases(lessor.clone(), count))
+    {
+        count += 1;
+    }
+    env.storage()
+        .instance()
+        .set(&DataKey::LessorLeases(lessor.clone(), count), &lease_id);
+}
+
+pub fn get_lessee_lease_count(env: &Env, lessee: &Address) -> u64 {
+    let mut count = 0;
+    while env
+        .storage()
+        .instance()
+        .has(&DataKey::LesseeLeases(lessee.clone(), count))
+    {
+        count += 1;
+    }
+    count
+}
+
+pub fn get_lessor_lease_count(env: &Env, lessor: &Address) -> u64 {
+    let mut count = 0;
+    while env
+        .storage()
+        .instance()
+        .has(&DataKey::LessorLeases(lessor.clone(), count))
+    {
+        count += 1;
+    }
+    count
+}
+
+pub fn get_lessee_lease(env: &Env, lessee: &Address, index: u64) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LesseeLeases(lessee.clone(), index))
+}
+
+pub fn get_lessor_lease(env: &Env, lessor: &Address, index: u64) -> Option<u64> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LessorLeases(lessor.clone(), index))
+}
+
+pub fn add_lease_history(env: &Env, lease_id: u64, history: &stellai_lib::LeaseHistoryEntry) {
+    let history_index = get_lease_history_count(env, lease_id);
+    env.storage()
+        .instance()
+        .set(&DataKey::LeaseHistory(lease_id, history_index), history);
+}
+
+pub fn get_lease_history_count(env: &Env, lease_id: u64) -> u64 {
+    let mut count = 0;
+    while env
+        .storage()
+        .instance()
+        .has(&DataKey::LeaseHistory(lease_id, count))
+    {
+        count += 1;
+    }
+    count
+}
+
+pub fn get_lease_history(
+    env: &Env,
+    lease_id: u64,
+    index: u64,
+) -> Option<stellai_lib::LeaseHistoryEntry> {
+    env.storage()
+        .instance()
+        .get(&DataKey::LeaseHistory(lease_id, index))
 }
