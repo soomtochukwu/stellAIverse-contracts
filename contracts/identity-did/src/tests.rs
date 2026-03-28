@@ -7,9 +7,7 @@ use soroban_sdk::Env;
 use soroban_sdk::String;
 use soroban_sdk::Vec;
 
-use crate::{
-    DIDContract, DIDDocument, DIDRecord, DIDStatus, Error, Service, VerificationMethod,
-};
+use crate::{DIDContract, DIDDocument, DIDRecord, DIDStatus, Error, Service, VerificationMethod};
 
 #[test]
 fn test_create_did_success() {
@@ -20,11 +18,13 @@ fn test_create_did_success() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -47,6 +47,7 @@ fn test_create_did_success() {
     let services = Vec::from_array(&env, [service1]);
 
     // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
     let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Verify DID was created
@@ -75,11 +76,13 @@ fn test_create_did_already_exists() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -92,6 +95,13 @@ fn test_create_did_already_exists() {
     let verification_methods = Vec::from_array(&env, [vm1]);
     let services = Vec::new(&env);
 
+    // Create first DID
+    let did1 = client.create_did(&controller, &verification_methods, &services);
+
+    // Try to create another DID for same controller - should fail
+    let result = client.try_create_did(&controller, &verification_methods, &services);
+    contractassert!(result.is_err());
+    contractassert!(result.unwrap_err() == RawError::from_contract_error(Error::DIDAlreadyExists));
     let did1 = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Try to create another DID for same controller - should fail
@@ -110,11 +120,13 @@ fn test_update_did_success() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -128,6 +140,7 @@ fn test_update_did_success() {
     let services = Vec::new(&env);
 
     // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
     let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Create new verification method
@@ -142,6 +155,17 @@ fn test_update_did_success() {
     let new_verification_methods = Vec::from_array(&env, [vm2]);
 
     // Update DID
+    let new_version = client.update_did(&did, &controller, Some(&new_verification_methods), None);
+
+    // Verify update
+    contractassert!(new_version == 2);
+
+    let document = client.get_did_document(&did);
+    contractassert!(document.version_id == 2);
+    contractassert!(document.verification_methods.len() == 1);
+    contractassert!(
+        document.verification_methods.get(0).unwrap().id == String::from_str(&env, "key-2")
+    );
     let new_version = DIDContract::update_did(env.clone(), did.clone(), controller.clone(), Some(new_verification_methods), None).unwrap();
 
     // Verify update
@@ -163,12 +187,14 @@ fn test_update_did_unauthorized() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
     let unauthorized = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -181,6 +207,13 @@ fn test_update_did_unauthorized() {
     let verification_methods = Vec::from_array(&env, [vm1]);
     let services = Vec::new(&env);
 
+    // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
+
+    // Try to update DID with unauthorized address - should fail
+    let result = client.try_update_did(&did, &unauthorized, None, None);
+    contractassert!(result.is_err());
+    contractassert!(result.unwrap_err() == RawError::from_contract_error(Error::Unauthorized));
     let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Try to update DID with unauthorized address - should fail
@@ -199,11 +232,13 @@ fn test_suspend_did_success() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -216,6 +251,8 @@ fn test_suspend_did_success() {
     let verification_methods = Vec::from_array(&env, [vm1]);
     let services = Vec::new(&env);
 
+    // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
     let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Suspend DID
@@ -236,11 +273,13 @@ fn test_revoke_did_success() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -254,6 +293,7 @@ fn test_revoke_did_success() {
     let services = Vec::new(&env);
 
     // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
     let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Revoke DID
@@ -274,11 +314,13 @@ fn test_reactivate_did_success() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -292,6 +334,17 @@ fn test_reactivate_did_success() {
     let services = Vec::new(&env);
 
     // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
+
+    // Suspend DID
+    client.suspend_did(
+        &did,
+        &admin,
+        &String::from_str(&env, "Suspension for investigation"),
+    );
+
+    // Reactivate DID
+    client.reactivate_did(&did, &admin);
         let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     DIDContract::suspend_did(env.clone(), did.clone(), admin.clone(), String::from_str(&env, "Suspension for investigation")).unwrap();
@@ -312,11 +365,13 @@ fn test_get_did_by_controller() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -330,6 +385,7 @@ fn test_get_did_by_controller() {
     let services = Vec::new(&env);
 
     // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
         let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Get DID by controller
@@ -347,11 +403,13 @@ fn test_is_valid_did() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -365,6 +423,7 @@ fn test_is_valid_did() {
     let services = Vec::new(&env);
 
     // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
     let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Check if DID is valid
@@ -372,6 +431,10 @@ fn test_is_valid_did() {
     assert!(is_valid);
 
     // Suspend DID and check validity
+    client.suspend_did(&did, &admin, &String::from_str(&env, "Test suspension"));
+
+    let is_valid_after_suspension = client.is_valid_did(&did);
+    contractassert!(!is_valid_after_suspension);
     DIDContract::suspend_did(env.clone(), did.clone(), admin.clone(), String::from_str(&env, "Test suspension")).unwrap();
 
     let is_valid_after_suspension = DIDContract::is_valid_did(env.clone(), did.clone()).unwrap();
@@ -388,11 +451,13 @@ fn test_get_did_history() {
 
     // Setup admin
     let admin = Address::generate(&env);
-    env.storage().instance().set(&symbol_short!("admin"), &admin);
+    env.storage()
+        .instance()
+        .set(&symbol_short!("admin"), &admin);
 
     // Create test addresses
     let controller = Address::generate(&env);
-    
+
     // Create verification methods
     let vm1 = VerificationMethod {
         id: String::from_str(&env, "key-1"),
@@ -406,6 +471,7 @@ fn test_get_did_history() {
     let services = Vec::new(&env);
 
     // Create DID
+    let did = client.create_did(&controller, &verification_methods, &services);
     let did = DIDContract::create_did(env.clone(), controller.clone(), verification_methods.clone(), services.clone()).unwrap();
 
     // Get history

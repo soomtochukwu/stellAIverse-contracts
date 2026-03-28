@@ -1,10 +1,10 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, Env,
-    Map, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, Env, Map,
+    String, Symbol, Vec,
 };
-use stellai_lib::{audit, admin, validation};
+use stellai_lib::{admin, audit, validation};
 
 // Verifiable Credential structure following W3C VC specification
 #[derive(Clone, Debug)]
@@ -13,7 +13,7 @@ pub struct VerifiableCredential {
     pub id: String,
     pub credential_id: u64,
     pub issuer: Address,
-    pub subject: String,  // DID of the subject
+    pub subject: String, // DID of the subject
     pub credential_type: Vec<String>,
     pub credential_schema: String,
     pub credential_status: CredentialStatus,
@@ -118,7 +118,7 @@ pub struct SelectiveDisclosure {
 pub struct Presentation {
     pub id: String,
     pub presentation_id: u64,
-    pub holder: String,  // DID of the holder
+    pub holder: String, // DID of the holder
     pub verifiable_credential: Vec<VerifiableCredential>,
     pub proof: Option<Proof>,
     pub created_at: u64,
@@ -367,7 +367,9 @@ impl VerifiableCredentialsContract {
         };
 
         // Store schema
-        env.storage().instance().set(&CREDENTIAL_SCHEMAS, &schema_id, &schema);
+        env.storage()
+            .instance()
+            .set(&CREDENTIAL_SCHEMAS, &schema_id, &schema);
 
         // Emit event
         env.events().publish(
@@ -416,18 +418,18 @@ impl VerifiableCredentialsContract {
 
         // Get schema
         let schema = Self::get_schema(env.clone(), &credential_schema)?;
-        
+
         // Validate credential against schema
         Self::validate_credential_against_schema(&credential_subject, &schema)?;
 
         // Generate credential ID
         let credential_id = Self::increment_counter(env.clone(), &CREDENTIAL_COUNTER);
         let credential_id_str = format!("credential_{}", credential_id);
-        
+
         // Create credential status
         let now = env.ledger().timestamp();
         let expiration_date = validity_period.map(|period| now + period);
-        
+
         let status = CredentialStatus {
             id: format!("status_{}", credential_id),
             type_: String::from_str(&env, "StatusList2021"),
@@ -468,7 +470,9 @@ impl VerifiableCredentialsContract {
         };
 
         // Store credential
-        env.storage().instance().set(&CREDENTIAL_REGISTRY, &credential_id, &registry);
+        env.storage()
+            .instance()
+            .set(&CREDENTIAL_REGISTRY, &credential_id, &registry);
 
         // Emit event
         env.events().publish(
@@ -504,7 +508,7 @@ impl VerifiableCredentialsContract {
     ) -> Result<(), Error> {
         // Get credential registry
         let mut registry = Self::get_credential_registry(env.clone(), credential_id)?;
-        
+
         // Validate authorization
         if registry.credential.issuer != issuer {
             return Err(Error::UnauthorizedIssuer);
@@ -533,7 +537,9 @@ impl VerifiableCredentialsContract {
         registry.audit_trail.push_back(audit_entry);
 
         // Store updated registry
-        env.storage().instance().set(&CREDENTIAL_REGISTRY, &credential_id, &registry);
+        env.storage()
+            .instance()
+            .set(&CREDENTIAL_REGISTRY, &credential_id, &registry);
 
         // Emit event
         env.events().publish(
@@ -581,7 +587,7 @@ impl VerifiableCredentialsContract {
         // Generate offer ID
         let offer_id = Self::increment_counter(env.clone(), &OFFER_COUNTER);
         let now = env.ledger().timestamp();
-        
+
         // Create offer
         let offer = CredentialOffer {
             offer_id,
@@ -597,7 +603,9 @@ impl VerifiableCredentialsContract {
         };
 
         // Store offer
-        env.storage().instance().set(&CREDENTIAL_OFFERS, &offer_id, &offer);
+        env.storage()
+            .instance()
+            .set(&CREDENTIAL_OFFERS, &offer_id, &offer);
 
         // Emit event
         env.events().publish(
@@ -625,26 +633,24 @@ impl VerifiableCredentialsContract {
     }
 
     /// Accept a credential offer
-    pub fn accept_offer(
-        env: Env,
-        offer_id: u64,
-        subject: Address,
-    ) -> Result<(), Error> {
+    pub fn accept_offer(env: Env, offer_id: u64, subject: Address) -> Result<(), Error> {
         // Get offer
         let mut offer = Self::get_offer(env.clone(), offer_id)?;
-        
+
         // Validate offer
         if offer.status != OfferStatus::Pending {
             return Err(Error::InvalidOffer);
         }
-        
+
         if env.ledger().timestamp() > offer.expires_at {
             return Err(Error::OfferExpired);
         }
 
         // Update offer status
         offer.status = OfferStatus::Accepted;
-        env.storage().instance().set(&CREDENTIAL_OFFERS, &offer_id, &offer);
+        env.storage()
+            .instance()
+            .set(&CREDENTIAL_OFFERS, &offer_id, &offer);
 
         // Emit event
         env.events().publish(
@@ -679,12 +685,12 @@ impl VerifiableCredentialsContract {
     ) -> Result<u64, Error> {
         // Get credential
         let registry = Self::get_credential_registry(env.clone(), credential_id)?;
-        
+
         // Validate credential
         if registry.credential.credential_status.revoked {
             return Err(Error::CredentialRevoked);
         }
-        
+
         if registry.credential.credential_status.suspended {
             return Err(Error::CredentialSuspended);
         }
@@ -697,12 +703,15 @@ impl VerifiableCredentialsContract {
         }
 
         // Validate disclosed fields
-        Self::validate_disclosed_fields(&registry.credential.credential_subject, &disclosed_fields)?;
+        Self::validate_disclosed_fields(
+            &registry.credential.credential_subject,
+            &disclosed_fields,
+        )?;
 
         // Generate disclosure ID
         let disclosure_id = Self::increment_counter(env.clone(), &DISCLOSURE_COUNTER);
         let now = env.ledger().timestamp();
-        
+
         // Create disclosure
         let disclosure = SelectiveDisclosure {
             disclosure_id,
@@ -713,16 +722,26 @@ impl VerifiableCredentialsContract {
             nonce: nonce.clone(),
             created_at: now,
             expires_at: now + DISCLOSURE_VALIDITY_PERIOD,
-            presentation_hash: Self::generate_presentation_hash(env.clone(), credential_id, &disclosed_fields, &nonce),
+            presentation_hash: Self::generate_presentation_hash(
+                env.clone(),
+                credential_id,
+                &disclosed_fields,
+                &nonce,
+            ),
             verified: false,
         };
 
         // Store disclosure
-        env.storage().instance().set(&SELECTIVE_DISCLOSURES, &disclosure_id, &disclosure);
+        env.storage()
+            .instance()
+            .set(&SELECTIVE_DISCLOSURES, &disclosure_id, &disclosure);
 
         // Emit event
         env.events().publish(
-            (Symbol::new(&env, "SelectiveDisclosureCreated"), &disclosure_id),
+            (
+                Symbol::new(&env, "SelectiveDisclosureCreated"),
+                &disclosure_id,
+            ),
             SelectiveDisclosureCreatedEvent {
                 disclosure_id,
                 credential_id,
@@ -753,7 +772,7 @@ impl VerifiableCredentialsContract {
     ) -> Result<bool, Error> {
         // Get credential
         let registry = Self::get_credential_registry(env.clone(), credential_id)?;
-        
+
         let now = env.ledger().timestamp();
         let mut result = true;
         let mut reason = None;
@@ -791,7 +810,9 @@ impl VerifiableCredentialsContract {
         };
 
         // Store verification record
-        env.storage().instance().set(&VERIFICATION_RECORDS, &verification_id, &verification);
+        env.storage()
+            .instance()
+            .set(&VERIFICATION_RECORDS, &verification_id, &verification);
 
         // Emit event
         env.events().publish(
@@ -824,26 +845,40 @@ impl VerifiableCredentialsContract {
     }
 
     /// Get credential registry with full details
-    pub fn get_credential_registry(env: Env, credential_id: u64) -> Result<CredentialRegistry, Error> {
-        let registry: Option<CredentialRegistry> = env.storage().instance().get(&CREDENTIAL_REGISTRY, &credential_id);
+    pub fn get_credential_registry(
+        env: Env,
+        credential_id: u64,
+    ) -> Result<CredentialRegistry, Error> {
+        let registry: Option<CredentialRegistry> = env
+            .storage()
+            .instance()
+            .get(&CREDENTIAL_REGISTRY, &credential_id);
         registry.ok_or(Error::CredentialNotFound)
     }
 
     /// Get schema by ID
     pub fn get_schema(env: Env, schema_id: &String) -> Result<CredentialSchema, Error> {
-        let schema: Option<CredentialSchema> = env.storage().instance().get(&CREDENTIAL_SCHEMAS, schema_id);
+        let schema: Option<CredentialSchema> =
+            env.storage().instance().get(&CREDENTIAL_SCHEMAS, schema_id);
         schema.ok_or(Error::InvalidSchema)
     }
 
     /// Get offer by ID
     pub fn get_offer(env: Env, offer_id: u64) -> Result<CredentialOffer, Error> {
-        let offer: Option<CredentialOffer> = env.storage().instance().get(&CREDENTIAL_OFFERS, &offer_id);
+        let offer: Option<CredentialOffer> =
+            env.storage().instance().get(&CREDENTIAL_OFFERS, &offer_id);
         offer.ok_or(Error::InvalidOffer)
     }
 
     /// Get selective disclosure by ID
-    pub fn get_selective_disclosure(env: Env, disclosure_id: u64) -> Result<SelectiveDisclosure, Error> {
-        let disclosure: Option<SelectiveDisclosure> = env.storage().instance().get(&SELECTIVE_DISCLOSURES, &disclosure_id);
+    pub fn get_selective_disclosure(
+        env: Env,
+        disclosure_id: u64,
+    ) -> Result<SelectiveDisclosure, Error> {
+        let disclosure: Option<SelectiveDisclosure> = env
+            .storage()
+            .instance()
+            .get(&SELECTIVE_DISCLOSURES, &disclosure_id);
         disclosure.ok_or(Error::SelectiveDisclosureFailed)
     }
 
@@ -855,7 +890,7 @@ impl VerifiableCredentialsContract {
     ) -> Result<Vec<CredentialVerification>, Error> {
         let mut records = Vec::new(&env);
         let counter_key = (VERIFICATION_RECORDS, credential_id);
-        
+
         // In a real implementation, we'd store records by credential ID
         // For now, return empty vector
         Ok(records)
@@ -965,8 +1000,17 @@ impl VerifiableCredentialsContract {
         format!("schema_{}", hex::encode(hash)[..16].to_string())
     }
 
-    fn generate_presentation_hash(env: Env, credential_id: u64, disclosed_fields: &Vec<String>, nonce: &String) -> String {
-        let fields_str = disclosed_fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(",");
+    fn generate_presentation_hash(
+        env: Env,
+        credential_id: u64,
+        disclosed_fields: &Vec<String>,
+        nonce: &String,
+    ) -> String {
+        let fields_str = disclosed_fields
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         let combined = format!("{}:{}:{}", credential_id, fields_str, nonce);
         let hash = env.crypto().sha256(&combined.into());
         hex::encode(hash)

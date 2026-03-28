@@ -1,4 +1,5 @@
 use soroban_sdk::{contracttype, Address, Bytes, Map, String, Symbol, Val, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, String, Symbol, Val, Vec, Map};
 
 /// Oracle data entry
 #[derive(Clone, Debug)]
@@ -662,10 +663,10 @@ pub struct ReputationReview {
     pub review_id: u64,
     pub reviewer_did: String,
     pub subject_did: String,
-    pub rating: u32,  // 1-5 stars
+    pub rating: u32, // 1-5 stars
     pub category: String,
     pub comment: Option<String>,
-    pub evidence: Vec<String>,  // Credential IDs as evidence
+    pub evidence: Vec<String>, // Credential IDs as evidence
     pub created_at: u64,
     pub verified: bool,
 }

@@ -7,6 +7,7 @@ mod storage;
 #[cfg(test)]
 mod prop_tests;
 
+use core::fmt::Write;
 use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol, Val, Vec};
 use stellai_lib::{
     atomic::AtomicTransactionSupport,
@@ -14,7 +15,8 @@ use stellai_lib::{
     storage_keys::LISTING_COUNTER_KEY,
     types::{
         Approval, ApprovalConfig, ApprovalHistory, ApprovalStatus, Auction, AuctionStatus,
-        AuctionType, Listing, ListingType, RoyaltyInfo,
+        AuctionType, LeaseData, LeaseExtensionRequest, LeaseHistoryEntry, LeaseState, Listing,
+        ListingType, RoyaltyInfo,
     },
     validation,
 };
@@ -1769,16 +1771,428 @@ impl Marketplace {
         }
     }
 
-    /// Unlock lease listing (rollback function)
-    pub fn unlock_lease_listing(env: Env, listing_id: u64) -> bool {
-        Self::unlock_listing(env, listing_id)
+    // ---------------- LEASE MANAGEMENT ----------------
+
+    /// Set lease configuration (admin only)
+    pub fn set_lease_config(
+        env: Env,
+        admin: Address,
+        deposit_bps: u32,
+        early_termination_penalty_bps: u32,
+    ) {
+        let current_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Contract not initialized");
+        assert!(admin == current_admin, "Unauthorized");
+
+        assert!(deposit_bps <= 5000, "Deposit cannot exceed 50%");
+        assert!(
+            early_termination_penalty_bps <= 5000,
+            "Penalty cannot exceed 50%"
+        );
+
+        let config = storage::LeaseConfig {
+            deposit_bps,
+            early_termination_penalty_bps,
+        };
+
+        storage::set_lease_config(&env, &config);
+
+        env.events().publish(
+            (Symbol::new(&env, "LeaseConfigUpdated"),),
+            (deposit_bps, early_termination_penalty_bps),
+        );
     }
 
-    /// Delete lease record (rollback function)
-    pub fn delete_lease_record(env: Env, listing_id: u64) -> bool {
-        // In a real implementation, this would delete the lease record
-        // For now, just return success
-        true
+    /// Get current lease configuration
+    pub fn get_lease_config(env: Env) -> storage::LeaseConfig {
+        storage::get_lease_config(&env)
+    }
+
+    /// Initiate a lease for an agent
+    pub fn initiate_lease(
+        env: Env,
+        listing_id: u64,
+        lessee: Address,
+        duration_seconds: u64,
+        auto_renew: bool,
+        lessee_consent_for_renewal: bool,
+    ) -> u64 {
+        lessee.require_auth();
+
+        if validation::validate_nonzero_id(listing_id).is_err() {
+            panic!("Invalid listing ID");
+        }
+        if duration_seconds == 0 {
+            panic!("Duration must be positive");
+        }
+        if duration_seconds > stellai_lib::MAX_DURATION_DAYS * 24 * 60 * 60 {
+            panic!("Duration exceeds maximum");
+        }
+
+        let listing_key = (Symbol::new(&env, "listing"), listing_id);
+        let listing: Listing = env
+            .storage()
+            .instance()
+            .get(&listing_key)
+            .expect("Listing not found");
+
+        if !listing.active {
+            panic!("Listing is not active");
+        }
+        if listing.listing_type != ListingType::Lease {
+            panic!("Listing is not for lease");
+        }
+
+        let lease_id = storage::increment_lease_counter(&env);
+        let now = env.ledger().timestamp();
+        let end_time = now + duration_seconds;
+
+        let config = storage::get_lease_config(&env);
+        let deposit_amount = (listing.price * (config.deposit_bps as i128)) / 10_000;
+
+        let lease = LeaseData {
+            lease_id,
+            agent_id: listing.agent_id,
+            listing_id,
+            lessor: listing.seller.clone(),
+            lessee: lessee.clone(),
+            start_time: now,
+            end_time,
+            duration_seconds,
+            deposit_amount,
+            total_value: listing.price,
+            auto_renew,
+            lessee_consent_for_renewal,
+            status: LeaseState::Active,
+            pending_extension_id: None,
+        };
+
+        storage::set_lease(&env, &lease);
+        storage::lessee_leases_append(&env, &lessee, lease_id);
+        storage::lessor_leases_append(&env, &listing.seller, lease_id);
+
+        // Add to history
+        let entry = LeaseHistoryEntry {
+            lease_id,
+            action: String::from_str(&env, "initiated"),
+            actor: lessee.clone(),
+            timestamp: now,
+            details: None,
+        };
+        storage::add_lease_history(&env, lease_id, &entry);
+
+        env.events().publish(
+            (Symbol::new(&env, "LeaseInitiated"),),
+            (lease_id, listing_id, lessee, duration_seconds, auto_renew),
+        );
+
+        lease_id
+    }
+
+    /// Request lease extension
+    pub fn request_lease_extension(
+        env: Env,
+        lease_id: u64,
+        lessee: Address,
+        additional_duration_seconds: u64,
+    ) -> u64 {
+        lessee.require_auth();
+
+        if validation::validate_nonzero_id(lease_id).is_err() {
+            panic!("Invalid lease ID");
+        }
+        if additional_duration_seconds == 0 {
+            panic!("Additional duration must be positive");
+        }
+
+        let mut lease = storage::get_lease(&env, lease_id).expect("Lease not found");
+
+        if lease.lessee != lessee {
+            panic!("Unauthorized: only lessee can request extension");
+        }
+        if lease.status != LeaseState::Active {
+            panic!("Lease is not active");
+        }
+        if lease.pending_extension_id.is_some() {
+            panic!("Extension already requested");
+        }
+
+        let extension_id = storage::increment_extension_counter(&env);
+        let now = env.ledger().timestamp();
+
+        let extension = LeaseExtensionRequest {
+            extension_id,
+            lease_id,
+            additional_duration_seconds,
+            requested_at: now,
+            approved: false,
+        };
+
+        storage::set_lease_extension(&env, &extension);
+
+        lease.status = LeaseState::ExtensionRequested;
+        lease.pending_extension_id = Some(extension_id);
+        storage::set_lease(&env, &lease);
+
+        // Add to history
+        let entry = LeaseHistoryEntry {
+            lease_id,
+            action: String::from_str(&env, "extension_requested"),
+            actor: lessee.clone(),
+            timestamp: now,
+            details: Some(String::from_str(&env, "additional_duration: 3600")),
+        };
+        storage::add_lease_history(&env, lease_id, &entry);
+
+        env.events().publish(
+            (Symbol::new(&env, "LeaseExtensionRequested"),),
+            (lease_id, extension_id, lessee, additional_duration_seconds),
+        );
+
+        extension_id
+    }
+
+    /// Approve lease extension
+    pub fn approve_lease_extension(env: Env, lease_id: u64, extension_id: u64, lessor: Address) {
+        lessor.require_auth();
+
+        if validation::validate_nonzero_id(lease_id).is_err() {
+            panic!("Invalid lease ID");
+        }
+        if validation::validate_nonzero_id(extension_id).is_err() {
+            panic!("Invalid extension ID");
+        }
+
+        let mut lease = storage::get_lease(&env, lease_id).expect("Lease not found");
+        let extension =
+            storage::get_lease_extension(&env, extension_id).expect("Extension not found");
+
+        if lease.lessor != lessor {
+            panic!("Unauthorized: only lessor can approve extension");
+        }
+        if lease.status != LeaseState::ExtensionRequested {
+            panic!("No extension requested");
+        }
+        if lease.pending_extension_id != Some(extension_id) {
+            panic!("Extension ID mismatch");
+        }
+        if extension.approved {
+            panic!("Extension already approved");
+        }
+
+        // Update lease with extension
+        lease.end_time += extension.additional_duration_seconds;
+        lease.duration_seconds += extension.additional_duration_seconds;
+        lease.status = LeaseState::Active;
+        lease.pending_extension_id = None;
+
+        storage::set_lease(&env, &lease);
+
+        // Mark extension as approved
+        let mut approved_extension = extension.clone();
+        approved_extension.approved = true;
+        storage::set_lease_extension(&env, &approved_extension);
+
+        // Add to history
+        let entry = LeaseHistoryEntry {
+            lease_id,
+            action: String::from_str(&env, "extension_approved"),
+            actor: lessor.clone(),
+            timestamp: env.ledger().timestamp(),
+            details: Some(String::from_str(&env, "additional_duration: 3600")),
+        };
+        storage::add_lease_history(&env, lease_id, &entry);
+
+        env.events().publish(
+            (Symbol::new(&env, "LeaseExtended"),),
+            (
+                lease_id,
+                extension_id,
+                lessor,
+                extension.additional_duration_seconds,
+            ),
+        );
+    }
+
+    /// Early lease termination with penalty
+    pub fn early_termination(env: Env, lease_id: u64, lessee: Address, termination_fee_paid: i128) {
+        lessee.require_auth();
+
+        if validation::validate_nonzero_id(lease_id).is_err() {
+            panic!("Invalid lease ID");
+        }
+        if termination_fee_paid <= 0 {
+            panic!("Termination fee must be positive");
+        }
+
+        let mut lease = storage::get_lease(&env, lease_id).expect("Lease not found");
+
+        if lease.lessee != lessee {
+            panic!("Unauthorized: only lessee can terminate");
+        }
+        if lease.status != LeaseState::Active {
+            panic!("Lease is not active");
+        }
+
+        let now = env.ledger().timestamp();
+        let remaining_time = if lease.end_time > now {
+            lease.end_time - now
+        } else {
+            0
+        };
+        let remaining_value =
+            (lease.total_value * remaining_time as i128) / lease.duration_seconds as i128;
+
+        let config = storage::get_lease_config(&env);
+        let required_penalty =
+            (remaining_value * (config.early_termination_penalty_bps as i128)) / 10_000;
+
+        if termination_fee_paid < required_penalty {
+            panic!("Insufficient termination fee");
+        }
+
+        lease.status = LeaseState::Terminated;
+        storage::set_lease(&env, &lease);
+
+        // Process termination fee payment to lessor
+        let token_address = storage::get_payment_token(&env);
+        let token_client = token::Client::new(&env, &token_address);
+        token_client.transfer(&lessee, &lease.lessor, &termination_fee_paid);
+
+        // Refund deposit if any
+        if lease.deposit_amount > 0 {
+            token_client.transfer(
+                &env.current_contract_address(),
+                &lessee,
+                &lease.deposit_amount,
+            );
+        }
+
+        // Add to history
+        let entry = LeaseHistoryEntry {
+            lease_id,
+            action: String::from_str(&env, "early_terminated"),
+            actor: lessee.clone(),
+            timestamp: now,
+            details: Some(String::from_str(&env, "fee_paid: 1000, penalty: 2000")),
+        };
+        storage::add_lease_history(&env, lease_id, &entry);
+
+        env.events().publish(
+            (Symbol::new(&env, "LeaseTerminated"),),
+            (lease_id, lessee, termination_fee_paid, required_penalty),
+        );
+    }
+
+    /// Automatic lease renewal
+    pub fn auto_renew_lease(env: Env, lease_id: u64) {
+        let mut lease = storage::get_lease(&env, lease_id).expect("Lease not found");
+
+        if lease.status != LeaseState::Active {
+            panic!("Lease is not active");
+        }
+        if !lease.auto_renew {
+            panic!("Auto-renewal not enabled");
+        }
+        if !lease.lessee_consent_for_renewal {
+            panic!("Lessee consent not provided");
+        }
+
+        let now = env.ledger().timestamp();
+        if now < lease.end_time {
+            panic!("Lease not yet expired");
+        }
+
+        // Renew lease for same duration
+        lease.start_time = now;
+        lease.end_time = now + lease.duration_seconds;
+        lease.status = LeaseState::Renewed;
+
+        storage::set_lease(&env, &lease);
+
+        // Add to history
+        let entry = LeaseHistoryEntry {
+            lease_id,
+            action: String::from_str(&env, "auto_renewed"),
+            actor: env.current_contract_address(),
+            timestamp: now,
+            details: Some(String::from_str(&env, "new_duration: 86400")),
+        };
+        storage::add_lease_history(&env, lease_id, &entry);
+
+        env.events().publish(
+            (Symbol::new(&env, "LeaseRenewed"),),
+            (lease_id, lease.duration_seconds),
+        );
+    }
+
+    /// Get lease by ID
+    pub fn get_lease_by_id(env: Env, lease_id: u64) -> Option<LeaseData> {
+        if validation::validate_nonzero_id(lease_id).is_err() {
+            panic!("Invalid lease ID");
+        }
+        storage::get_lease(&env, lease_id)
+    }
+
+    /// Get active leases for an address (lessee or lessor)
+    pub fn get_active_leases(env: Env, user: Address) -> Vec<LeaseData> {
+        let mut active_leases = Vec::new(&env);
+
+        // Check as lessee
+        let lessee_count = storage::get_lessee_lease_count(&env, &user);
+        for i in 0..lessee_count {
+            if let Some(lease_id) = storage::get_lessee_lease(&env, &user, i) {
+                if let Some(lease) = storage::get_lease(&env, lease_id) {
+                    if lease.status == LeaseState::Active {
+                        active_leases.push_back(lease);
+                    }
+                }
+            }
+        }
+
+        // Check as lessor
+        let lessor_count = storage::get_lessor_lease_count(&env, &user);
+        for i in 0..lessor_count {
+            if let Some(lease_id) = storage::get_lessor_lease(&env, &user, i) {
+                if let Some(lease) = storage::get_lease(&env, lease_id) {
+                    if lease.status == LeaseState::Active {
+                        let mut found = false;
+                        for existing in active_leases.iter() {
+                            if existing.lease_id == lease.lease_id {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            active_leases.push_back(lease);
+                        }
+                    }
+                }
+            }
+        }
+
+        active_leases
+    }
+
+    /// Get lease history
+    pub fn get_lease_history(env: Env, lease_id: u64) -> Vec<LeaseHistoryEntry> {
+        if validation::validate_nonzero_id(lease_id).is_err() {
+            panic!("Invalid lease ID");
+        }
+
+        let history_count = storage::get_lease_history_count(&env, lease_id);
+        let mut history = Vec::new(&env);
+
+        for i in 0..history_count {
+            if let Some(entry) = storage::get_lease_history(&env, lease_id, i) {
+                history.push_back(entry);
+            }
+        }
+
+        history
     }
 }
 
@@ -1787,3 +2201,6 @@ impl Marketplace {
 
 #[cfg(test)]
 mod test_dynamic_fees;
+
+#[cfg(test)]
+mod test_lease;
