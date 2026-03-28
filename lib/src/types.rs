@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Bytes, String, Symbol, Val, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, String, Symbol, Val, Vec, Map};
 
 /// Oracle data entry
 #[derive(Clone, Debug)]
@@ -36,6 +36,68 @@ pub struct Agent {
 pub struct RateLimit {
     pub window_seconds: u64,
     pub max_operations: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BehaviorProfile {
+    pub agent_id: u64,
+    pub operations_per_hour: Vec<u32>, // last 24 hours
+    pub avg_execution_cost: i128,
+    pub action_type_distribution: Vec<(String, u32)>,
+    pub last_updated: u64,
+    pub learning_count: u32,
+    pub profile_frozen: bool,
+}
+
+#[contracttype]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThresholdKeyShare {
+    pub agent_id: u64,
+    pub share_holder: Address,
+    pub share_index: u32,
+    pub x_coordinate: u32,
+    pub y_coordinate_encrypted: Bytes,
+    pub commitment: Bytes,
+    pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProposalStatus {
+    Pending,
+    Executed,
+    Cancelled,
+}
+
+#[contracttype]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThresholdProposal {
+    pub proposal_id: u64,
+    pub agent_id: u64,
+    pub action_data: Bytes,
+    pub proposer: Address,
+    pub threshold_m: u32,
+    pub signers: Vec<Address>,
+    pub status: ProposalStatus,
+    pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum AnomalySeverity {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnomalyScore {
+    pub score: i128, // basis points: 300 = 3.00
+    pub anomaly_reason: String,
+    pub severity: AnomalySeverity,
 }
 
 /// Represents a marketplace listing
@@ -118,13 +180,13 @@ pub enum PriceDecay {
     Exponential = 1,
 }
 
-#[derive(Clone, Copy)]
 #[contracttype]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DutchAuctionConfig {
     pub start_price: i128,
-    pub end_price: i128,
-    pub duration_seconds: u64,
-    pub price_decay: u32,
+    pub reserve_price: i128,
+    pub start_time: u64,
+    pub end_time: u64,
 }
 
 #[contracttype]
@@ -136,12 +198,35 @@ pub struct Auction {
     pub auction_type: AuctionType,
     pub start_price: i128,
     pub reserve_price: i128,
+    pub current_price: i128,
     pub highest_bidder: Option<Address>,
     pub highest_bid: i128,
     pub start_time: u64,
     pub end_time: u64,
     pub min_bid_increment_bps: u32,
     pub status: AuctionStatus,
+    pub dutch_config: Option<Bytes>,
+    pub sealed_commit_end: Option<u64>,
+    pub sealed_reveal_end: Option<u64>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SealedCommit {
+    pub bidder: Address,
+    pub commitment: Bytes,
+    pub deposit: i128,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SealedReveal {
+    pub bidder: Address,
+    pub amount: i128,
+    pub nonce: String,
+    pub deposit: i128,
+    pub timestamp: u64,
 }
 
 /// Multi-signature approval configuration for high-value sales
@@ -388,7 +473,6 @@ pub struct DIDRecord {
 
 /// Verifiable Credential structure following W3C VC specification
 #[derive(Clone, Debug)]
-#[contracttype]
 pub struct VerifiableCredential {
     pub id: String,
     pub credential_id: u64,
