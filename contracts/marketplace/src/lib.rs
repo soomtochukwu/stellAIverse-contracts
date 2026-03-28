@@ -929,7 +929,8 @@ impl Marketplace {
         let duration = auction.end_time - auction.start_time;
         let price_range = auction.start_price - auction.reserve_price;
         auction.start_price - (price_range * (elapsed as i128)) / (duration as i128)
-    }
+            status: AuctionStatus::Active,
+            dutch_config: if auction_type == AuctionType::Dutch {
 
     pub fn place_bid(env: Env, auction_id: u64, bidder: Address, amount: i128) {
         bidder.require_auth();
@@ -939,6 +940,8 @@ impl Marketplace {
             "Auction not active"
         );
         assert!(
+            sealed_commit_end: None,
+            sealed_reveal_end: None,
             auction.auction_type == AuctionType::English,
             "Not an English auction"
         );
@@ -948,12 +951,15 @@ impl Marketplace {
         );
 
         let min_increment = (auction.highest_bid * (auction.min_bid_increment_bps as i128)) / 10000;
-        let min_bid = auction.highest_bid
-            + (if min_increment > 1000 {
-                min_increment
-            } else {
-                1000
-            });
+        let computed_min_step = if min_increment > 1000 { min_increment } else { 1000 };
+        let min_bid = if auction.highest_bid > 0 {
+            auction.highest_bid + computed_min_step
+        } else {
+            // No bids yet: require at least the start price (or start price + min step)
+            let baseline = auction.start_price;
+            if baseline > computed_min_step { baseline } else { computed_min_step }
+        };
+
         assert!(amount >= min_bid, "Bid too low");
 
         let token_client = token::Client::new(&env, &get_payment_token(&env));
@@ -1001,6 +1007,135 @@ impl Marketplace {
             tx_hash,
             description,
         );
+    }
+
+    /// Create a sealed-bid auction with explicit commit/reveal durations
+    pub fn create_sealed_auction(
+        env: Env,
+        agent_id: u64,
+        seller: Address,
+        start_price: i128,
+        reserve_price: i128,
+        commit_duration: u64,
+        reveal_duration: u64,
+        min_bid_increment_bps: u32,
+    ) -> u64 {
+        seller.require_auth();
+        assert!(start_price > 0, "Invalid start price");
+        assert!(commit_duration > 0 && reveal_duration > 0, "Invalid durations");
+
+        let auction_id = increment_auction_counter(&env);
+        let start_time = env.ledger().timestamp();
+        let commit_end = start_time + commit_duration;
+        let reveal_end = commit_end + reveal_duration;
+
+        let auction = Auction {
+            auction_id,
+            agent_id,
+            seller,
+            auction_type: AuctionType::Sealed,
+            start_price,
+            reserve_price,
+            current_price: start_price,
+            highest_bidder: None,
+            highest_bid: 0,
+            start_time,
+            end_time: reveal_end,
+            min_bid_increment_bps,
+            status: AuctionStatus::Active,
+            dutch_config: None,
+            sealed_commit_end: Some(commit_end),
+            sealed_reveal_end: Some(reveal_end),
+        };
+
+        set_auction(&env, &auction);
+
+        env.events().publish(
+            (Symbol::new(&env, "AuctionCreated"),),
+            (auction_id, agent_id, AuctionType::Sealed, start_price),
+        );
+
+        auction_id
+    }
+
+    pub fn commit_sealed_bid(env: Env, auction_id: u64, bidder: Address, commitment: Bytes, deposit: i128) {
+        bidder.require_auth();
+        let mut auction = get_auction(&env, auction_id).expect("Auction not found");
+        assert!(auction.status == AuctionStatus::Active, "Auction not active");
+        assert!(auction.auction_type == AuctionType::Sealed, "Not a sealed auction");
+
+        let now = env.ledger().timestamp();
+        let commit_end = auction.sealed_commit_end.expect("No commit end");
+        assert!(now < commit_end, "Commit phase ended");
+
+        let token_client = token::Client::new(&env, &get_payment_token(&env));
+        token_client.transfer(&bidder, &env.current_contract_address(), &deposit);
+
+        let commit = stellai_lib::SealedCommit {
+            bidder: bidder.clone(),
+            commitment: commitment.clone(),
+            deposit,
+            timestamp: now,
+        };
+
+        add_sealed_commit(&env, auction_id, &commit);
+
+        env.events().publish((Symbol::new(&env, "BidCommitted"),), (auction_id, bidder, deposit));
+    }
+
+    pub fn reveal_sealed_bid(env: Env, auction_id: u64, bidder: Address, amount: i128, nonce: String) {
+        bidder.require_auth();
+        let mut auction = get_auction(&env, auction_id).expect("Auction not found");
+        assert!(auction.status == AuctionStatus::Active, "Auction not active");
+        assert!(auction.auction_type == AuctionType::Sealed, "Not a sealed auction");
+
+        let now = env.ledger().timestamp();
+        let commit_end = auction.sealed_commit_end.expect("No commit end");
+        let reveal_end = auction.sealed_reveal_end.expect("No reveal end");
+        assert!(now >= commit_end && now < reveal_end, "Not in reveal window");
+
+        // Find the bidder's commitment
+        let commit_count = get_sealed_commit_count(&env, auction_id);
+        let mut found: Option<stellai_lib::SealedCommit> = None;
+        for i in 0..commit_count {
+            if let Some(c) = get_sealed_commit_entry(&env, auction_id, i) {
+                if c.bidder == bidder {
+                    found = Some(c);
+                    break;
+                }
+            }
+        }
+        let commit = found.expect("Commitment not found");
+
+        // Verify commitment hash: format "amount:nonce:bidder"
+        let bidder_str = bidder.to_string();
+        let combined = format!("{}:{}:{}", amount, nonce, bidder_str);
+        let hash = env.crypto().sha256(&combined.into());
+        let hash_bytes: Bytes = hash.into();
+        assert!(hash_bytes == commit.commitment, "Commitment mismatch");
+
+        // Ensure deposit covers amount
+        assert!(commit.deposit >= amount, "Deposit insufficient for bid");
+
+        let reveal = stellai_lib::SealedReveal {
+            bidder: bidder.clone(),
+            amount,
+            nonce: nonce.clone(),
+            deposit: commit.deposit,
+            timestamp: now,
+        };
+
+        add_sealed_reveal(&env, auction_id, &reveal);
+
+        // Track highest
+        if amount > auction.highest_bid {
+            auction.highest_bid = amount;
+            auction.highest_bidder = Some(bidder.clone());
+        }
+
+        set_auction(&env, &auction);
+
+        env.events().publish((Symbol::new(&env, "BidRevealed"),), (auction_id, bidder, amount));
     }
 
     pub fn accept_dutch_price(env: Env, auction_id: u64, buyer: Address) {
@@ -1058,22 +1193,100 @@ impl Marketplace {
                 Self::process_fee_transition(env.clone());
 
                 let platform_fee_bps = Self::get_platform_fee(env.clone());
-                Self::route_sale_payment(
-                    &env,
-                    auction.agent_id,
-                    auction.highest_bid,
-                    &winner,
-                    &auction.seller,
-                );
+                // For sealed auctions, collect deposits and refund non-winners
+                let token_client = token::Client::new(&env, &get_payment_token(&env));
 
-                // NOTE: NFT transfer logic should be added here
+                if auction.auction_type == AuctionType::Sealed {
+                    // Refund all sealed commits and reveals except winner; accumulate winner deposit
+                    let mut winner_deposit: i128 = 0;
 
-                auction.status = AuctionStatus::Won;
+                    // Refund revealed bidders (non-winners)
+                    let reveal_count = get_sealed_reveal_count(&env, auction_id);
+                    for i in 0..reveal_count {
+                        if let Some(rev) = get_sealed_reveal_entry(&env, auction_id, i) {
+                            if rev.bidder != winner {
+                                token_client.transfer(
+                                    &env.current_contract_address(),
+                                    &rev.bidder,
+                                    &rev.deposit,
+                                );
+                            } else {
+                                winner_deposit += rev.deposit;
+                            }
+                        }
+                    }
 
-                env.events().publish(
-                    (Symbol::new(&env, "AuctionWon"),),
-                    (auction_id, winner, auction.highest_bid, platform_fee_bps),
-                );
+                    // Refund committed-but-unrevealed bidders
+                    let commit_count = get_sealed_commit_count(&env, auction_id);
+                    for i in 0..commit_count {
+                        if let Some(c) = get_sealed_commit_entry(&env, auction_id, i) {
+                            // if no reveal exists for this bidder, refund deposit
+                            let mut revealed = false;
+                            for j in 0..reveal_count {
+                                if let Some(r) = get_sealed_reveal_entry(&env, auction_id, j) {
+                                    if r.bidder == c.bidder {
+                                        revealed = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if !revealed {
+                                // refund full deposit
+                                token_client.transfer(
+                                    &env.current_contract_address(),
+                                    &c.bidder,
+                                    &c.deposit,
+                                );
+                            }
+                        }
+                    }
+
+                    // Proceed with payment routing using the highest bid
+                    Self::route_sale_payment(
+                        &env,
+                        auction.agent_id,
+                        auction.highest_bid,
+                        &winner,
+                        &auction.seller,
+                    );
+
+                    // Refund winner excess deposit if any
+                    if winner_deposit > auction.highest_bid {
+                        let excess = winner_deposit - auction.highest_bid;
+                        token_client.transfer(
+                            &env.current_contract_address(),
+                            &winner,
+                            &excess,
+                        );
+                    }
+
+                    // NOTE: NFT transfer logic should be added here
+
+                    auction.status = AuctionStatus::Won;
+
+                    env.events().publish(
+                        (Symbol::new(&env, "AuctionWon"),),
+                        (auction_id, winner, auction.highest_bid, platform_fee_bps),
+                    );
+                } else {
+                    // Non-sealed auctions: normal payment routing
+                    Self::route_sale_payment(
+                        &env,
+                        auction.agent_id,
+                        auction.highest_bid,
+                        &winner,
+                        &auction.seller,
+                    );
+
+                    // NOTE: NFT transfer logic should be added here
+
+                    auction.status = AuctionStatus::Won;
+
+                    env.events().publish(
+                        (Symbol::new(&env, "AuctionWon"),),
+                        (auction_id, winner, auction.highest_bid, platform_fee_bps),
+                    );
+                }
             } else {
                 // Refund if reserve not met (English only)
                 if is_english {
