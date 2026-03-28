@@ -4,6 +4,8 @@ mod atomic;
 mod payment_types;
 mod payments;
 mod storage;
+#[cfg(test)]
+mod prop_tests;
 
 use core::fmt::Write;
 use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Symbol, Val, Vec};
