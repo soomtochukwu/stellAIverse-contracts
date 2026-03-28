@@ -4,6 +4,8 @@ use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, Bytes, Env, IntoVal, String,
     Symbol, Vec,
 };
+#[cfg(test)]
+mod prop_tests;
 use stellai_lib::{
     admin, errors::ContractError, storage_keys::EXEC_CTR_KEY, validation, ADMIN_KEY,
     DEFAULT_RATE_LIMIT_OPERATIONS, DEFAULT_RATE_LIMIT_WINDOW_SECONDS, MAX_DATA_SIZE,

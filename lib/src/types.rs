@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Bytes, String, Symbol, Val, Vec};
+use soroban_sdk::{contracttype, Address, Bytes, Map, String, Symbol, Val, Vec};
 
 /// Oracle data entry
 #[derive(Clone, Debug)]
@@ -89,6 +89,14 @@ pub enum EvolutionStatus {
 pub struct RoyaltyInfo {
     pub recipient: Address,
     pub fee: u32,
+}
+
+/// Wrapper enum so Option<RoyaltyInfo> works inside contracttype structs
+#[derive(Clone, Debug)]
+#[contracttype]
+pub enum OptionalRoyaltyInfo {
+    None,
+    Some(RoyaltyInfo),
 }
 
 #[contracttype]
@@ -389,21 +397,22 @@ pub struct DIDRecord {
 /// Verifiable Credential structure following W3C VC specification
 #[derive(Clone, Debug)]
 #[contracttype]
-pub struct VerifiableCredential {
-    pub id: String,
-    pub credential_id: u64,
-    pub issuer: Address,
-    pub subject: String,  // DID of the subject
-    pub credential_type: Vec<String>,
-    pub credential_schema: String,
-    pub credential_status: CredentialStatus,
-    pub issuance_date: u64,
-    pub expiration_date: Option<u64>,
-    pub credential_subject: Map<String, String>,
-    pub proof: Option<VCProof>,
-    pub non_revoked: bool,
-    pub created_at: u64,
-    pub updated_at: u64,
+pub struct VCProof {
+    pub type_: String,
+    pub created: u64,
+    pub proof_purpose: String,
+    pub verification_method: String,
+    pub challenge: Option<String>,
+    pub domain: Option<String>,
+    pub jws: Option<String>,
+}
+
+/// Wrapper enum so Option<VCProof> works inside contracttype structs
+#[derive(Clone, Debug)]
+#[contracttype]
+pub enum OptionalVCProof {
+    None,
+    Some(VCProof),
 }
 
 #[derive(Clone, Debug)]
@@ -421,14 +430,21 @@ pub struct CredentialStatus {
 
 #[derive(Clone, Debug)]
 #[contracttype]
-pub struct VCProof {
-    pub type_: String,
-    pub created: u64,
-    pub proof_purpose: String,
-    pub verification_method: String,
-    pub challenge: Option<String>,
-    pub domain: Option<String>,
-    pub jws: Option<String>,
+pub struct VerifiableCredential {
+    pub id: String,
+    pub credential_id: u64,
+    pub issuer: Address,
+    pub subject: String,  // DID of the subject
+    pub credential_type: Vec<String>,
+    pub credential_schema: String,
+    pub credential_status: CredentialStatus,
+    pub issuance_date: u64,
+    pub expiration_date: Option<u64>,
+    pub credential_subject: Map<String, String>,
+    pub proof: OptionalVCProof,
+    pub non_revoked: bool,
+    pub created_at: u64,
+    pub updated_at: u64,
 }
 
 #[derive(Clone, Debug)]

@@ -38,6 +38,10 @@ jobs:
       - name: Build Contracts
         run: cargo build --release --target wasm32-unknown-unknown
 
+      - name: Property-Based Tests
+        run: cargo test -p agent-nft -p marketplace -p execution-hub --lib prop_tests
+        timeout-minutes: 10
+
   formal_verification:
     name: Formal Verification (Kani)
     runs-on: ubuntu-latest

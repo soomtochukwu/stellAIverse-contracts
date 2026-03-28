@@ -12,7 +12,7 @@ use stellai_lib::{
     audit::{create_audit_log, OperationType},
     errors::ContractError,
     storage_keys::{AGENT_COUNTER_KEY, APPROVED_MINTERS_KEY},
-    types::{Agent, RoyaltyInfo},
+    types::{Agent, OptionalRoyaltyInfo, RoyaltyInfo},
     validation, ADMIN_KEY,
 };
 
@@ -41,7 +41,7 @@ pub struct AgentMintData {
     pub model_hash: String,
     pub metadata_cid: String,
     pub capabilities: Vec<String>,
-    pub royalty: Option<RoyaltyInfo>,
+    pub royalty: OptionalRoyaltyInfo,
 }
 
 #[contract]
@@ -666,7 +666,7 @@ impl AgentNFT {
             Self::set_agent_lease_status(&env, agent_id, false);
 
             // Handle Royalty if present
-            if let Some(royalty) = data.royalty {
+            if let OptionalRoyaltyInfo::Some(royalty) = data.royalty {
                 Self::validate_royalty_fee(royalty.fee)?;
                 let royalty_key = Self::get_royalty_key(&env, agent_id);
                 env.storage().instance().set(&royalty_key, &royalty);
