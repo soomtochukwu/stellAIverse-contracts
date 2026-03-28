@@ -86,6 +86,31 @@
                         "val": {
                           "u64": 0
                         }
+                      },
+                      {
+                        "key": {
+                          "symbol": "rate_gl"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "operations"
+                              },
+                              "val": {
+                                "u32": 100
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "window_seconds"
+                              },
+                              "val": {
+                                "u64": 60
+                              }
+                            }
+                          ]
+                        }
                       }
                     ]
                   }

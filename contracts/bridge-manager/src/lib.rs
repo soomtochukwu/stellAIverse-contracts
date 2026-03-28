@@ -1,6 +1,12 @@
 #![no_std]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Symbol, Vec};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env, Symbol, Vec, IntoVal};
+
+// Interface for the AgentNFT contract
+#[soroban_sdk::contractclient(name = "AgentNFTClient")]
+pub trait AgentNFTInterface {
+    fn transfer_agent(env: Env, agent_id: u64, from: Address, to: Address);
+}
 
 #[derive(Clone)]
 #[contracttype]
@@ -47,6 +53,7 @@ pub struct BridgeRequest {
     pub bridge_id: u64,
     pub agent_id: u64,
     pub owner: Address,
+    pub metadata_cid: soroban_sdk::String,
     pub source_chain: u32,
     pub target_chain: u32,
     pub notional_value: i128,
@@ -184,6 +191,7 @@ impl BridgeManager {
         env: Env,
         agent_id: u64,
         owner: Address,
+        metadata_cid: soroban_sdk::String,
         target_chain: u32,
         notional_value: i128,
     ) -> Result<u64, BridgeError> {
@@ -198,6 +206,15 @@ impl BridgeManager {
         }
 
         owner.require_auth();
+
+        // 1. Lock the Agent NFT in the bridge contract
+        let agent_contract: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::AgentContract)
+            .ok_or(BridgeError::NotInitialized)?;
+        let agent_client = AgentNFTClient::new(&env, &agent_contract);
+        agent_client.transfer_agent(&agent_id, &owner, &env.current_contract_address());
 
         // Ensure we are not double-bridging the same agent.
         let locked: bool = env
@@ -261,6 +278,7 @@ impl BridgeManager {
             bridge_id,
             agent_id,
             owner: owner.clone(),
+            metadata_cid,
             source_chain: 0, // Stellar canonical source
             target_chain,
             notional_value,
@@ -286,6 +304,7 @@ impl BridgeManager {
                 bridge_id,
                 agent_id,
                 owner,
+                metadata_cid,
                 target_chain,
                 notional_value,
                 fee,
@@ -475,6 +494,15 @@ impl BridgeManager {
         env.storage()
             .instance()
             .set(&DataKey::LiquidityBalance, &liquidity);
+
+        // 2. Unlock the Agent NFT and transfer it to the recipient
+        let agent_contract: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::AgentContract)
+            .ok_or(BridgeError::NotInitialized)?;
+        let agent_client = AgentNFTClient::new(&env, &agent_contract);
+        agent_client.transfer_agent(&req.agent_id, &env.current_contract_address(), &recipient);
 
         env.storage()
             .instance()

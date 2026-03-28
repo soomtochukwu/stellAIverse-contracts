@@ -6,6 +6,16 @@ use soroban_sdk::{Address, Env, Vec};
 
 use crate::BridgeManagerClient;
 
+#[contract]
+pub struct MockAgentNFT;
+
+#[contractimpl]
+impl MockAgentNFT {
+    pub fn transfer_agent(_env: Env, _agent_id: u64, _from: Address, _to: Address) {
+        // Mock transfer logic
+    }
+}
+
 fn setup_env() -> Env {
     let env = Env::default();
     env.mock_all_auths();
@@ -16,7 +26,7 @@ fn setup_env() -> Env {
 fn test_init_and_config() {
     let env = setup_env();
     let admin = Address::generate(&env);
-    let agent_contract = Address::generate(&env);
+    let agent_contract = env.register_contract(None, MockAgentNFT);
     let payment_token = Address::generate(&env);
 
     let bridge_id = env.register_contract(None, BridgeManager);
@@ -46,7 +56,7 @@ fn test_lock_and_bridge_and_fee_calculation() {
     let env = setup_env();
     let admin = Address::generate(&env);
     let owner = Address::generate(&env);
-    let agent_contract = Address::generate(&env);
+    let agent_contract = env.register_contract(None, MockAgentNFT);
     let payment_token = Address::generate(&env);
 
     let bridge_id_addr = env.register_contract(None, BridgeManager);
@@ -59,14 +69,16 @@ fn test_lock_and_bridge_and_fee_calculation() {
 
     let notional_value: i128 = 100_000;
     let target_chain: u32 = 1;
+    let metadata_cid = soroban_sdk::String::from_str(&env, "QmTestCID123");
 
-    let bridge_id = bridge.lock_and_bridge(&1u64, &owner, &target_chain, &notional_value);
+    let bridge_id = bridge.lock_and_bridge(&1u64, &owner, &metadata_cid, &target_chain, &notional_value);
 
     assert_eq!(bridge_id, 1);
 
     let req = bridge.get_bridge_request(&bridge_id).unwrap();
     assert_eq!(req.agent_id, 1);
     assert_eq!(req.owner, owner);
+    assert_eq!(req.metadata_cid, metadata_cid);
     assert_eq!(req.notional_value, notional_value);
     assert_eq!(req.status, BridgeStatus::PendingOutbound);
 
@@ -86,7 +98,7 @@ fn test_m_of_n_approvals_and_unwrap_flow() {
     let env = setup_env();
     let admin = Address::generate(&env);
     let owner = Address::generate(&env);
-    let agent_contract = Address::generate(&env);
+    let agent_contract = env.register_contract(None, MockAgentNFT);
     let payment_token = Address::generate(&env);
 
     let bridge_id_addr = env.register_contract(None, BridgeManager);
@@ -102,7 +114,8 @@ fn test_m_of_n_approvals_and_unwrap_flow() {
 
     let notional_value: i128 = 50_000;
     let target_chain: u32 = 2;
-    let bridge_id = bridge.lock_and_bridge(&2u64, &owner, &target_chain, &notional_value);
+    let metadata_cid = soroban_sdk::String::from_str(&env, "QmTestCID123");
+    let bridge_id = bridge.lock_and_bridge(&2u64, &owner, &metadata_cid, &target_chain, &notional_value);
 
     // Outbound approvals
     bridge.approve_outbound(&signer1, &bridge_id);
@@ -141,7 +154,7 @@ fn test_bridge_expiration() {
     let env = setup_env();
     let admin = Address::generate(&env);
     let owner = Address::generate(&env);
-    let agent_contract = Address::generate(&env);
+    let agent_contract = env.register_contract(None, MockAgentNFT);
     let payment_token = Address::generate(&env);
 
     let bridge_id_addr = env.register_contract(None, BridgeManager);
@@ -154,7 +167,8 @@ fn test_bridge_expiration() {
 
     let notional_value: i128 = 10_000;
     let target_chain: u32 = 3;
-    let bridge_id = bridge.lock_and_bridge(&3u64, &owner, &target_chain, &notional_value);
+    let metadata_cid = soroban_sdk::String::from_str(&env, "QmTestCID123");
+    let bridge_id = bridge.lock_and_bridge(&3u64, &owner, &metadata_cid, &target_chain, &notional_value);
 
     // Move time forward beyond expiration
     let now = env.ledger().timestamp();
