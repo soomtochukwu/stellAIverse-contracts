@@ -2,11 +2,14 @@
 
 #![cfg(test)]
 
-use soroban_sdk::{Address, Env, Symbol, String};
 use soroban_sdk::testutils::Address as _;
-use stellai_lib::{LeaseData, LeaseState, LeaseHistoryEntry, Listing, ListingType, LISTING_COUNTER_KEY};
+use soroban_sdk::testutils::Ledger;
+use soroban_sdk::{Address, Env, String, Symbol};
+use stellai_lib::{
+    LeaseData, LeaseHistoryEntry, LeaseState, Listing, ListingType, LISTING_COUNTER_KEY,
+};
 
-use crate::{Marketplace, MarketplaceClient, storage::*};
+use crate::{storage::*, Marketplace, MarketplaceClient};
 
 /// Setup env with marketplace initialized and a lease written to storage (no token needed).
 /// Call after init_contract; all storage writes run inside contract context.
@@ -52,8 +55,8 @@ fn setup_lease_in_storage(env: &Env, contract_id: &Address) -> (Address, Address
             duration_seconds,
             deposit_amount,
             total_value,
-            auto_renew: false,
-            lessee_consent_for_renewal: false,
+            auto_renew: true,                 // Enable auto-renewal for testing
+            lessee_consent_for_renewal: true, // Enable consent for testing
             status: LeaseState::Active,
             pending_extension_id: None,
         };
@@ -173,12 +176,188 @@ fn test_lease_history() {
 
     let history_before = client.get_lease_history(&lease_id);
     assert_eq!(history_before.len(), 1);
-    assert_eq!(history_before.get(0).unwrap().action, String::from_str(&env, "initiated"));
+    assert_eq!(
+        history_before.get(0).unwrap().action,
+        String::from_str(&env, "initiated")
+    );
 
     client.request_lease_extension(&lease_id, &lessee, &3600);
 
     let history = client.get_lease_history(&lease_id);
     assert!(history.len() >= 2);
-    assert_eq!(history.get(0).unwrap().action, String::from_str(&env, "initiated"));
-    assert_eq!(history.get(1).unwrap().action, String::from_str(&env, "extension_requested"));
+    assert_eq!(
+        history.get(0).unwrap().action,
+        String::from_str(&env, "initiated")
+    );
+    assert_eq!(
+        history.get(1).unwrap().action,
+        String::from_str(&env, "extension_requested")
+    );
+}
+
+#[test]
+fn test_lease_early_termination() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Marketplace);
+    let client = MarketplaceClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.init_contract(&admin);
+    let (_lessor, lessee, lease_id, _) = setup_lease_in_storage(&env, &contract_id);
+
+    // Set payment token for termination fee processing
+    let token_address = Address::generate(&env);
+    client.set_payment_token(&admin, &token_address);
+
+    // Calculate expected penalty (20% of total value since we're terminating early)
+    let lease = client.get_lease_by_id(&lease_id).unwrap();
+    let expected_penalty = (lease.total_value * 2000) / 10000; // 20% of total value
+
+    // Test early termination with sufficient fee
+    let termination_fee = expected_penalty;
+    client.early_termination(&lease_id, &lessee, &termination_fee);
+
+    let terminated_lease = client.get_lease_by_id(&lease_id).unwrap();
+    assert!(terminated_lease.status == LeaseState::Terminated);
+
+    // Check history
+    let history = client.get_lease_history(&lease_id);
+    assert!(history.len() >= 2);
+    assert_eq!(
+        history.get(1).unwrap().action,
+        String::from_str(&env, "early_terminated")
+    );
+}
+
+#[test]
+fn test_auto_renewal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Marketplace);
+    let client = MarketplaceClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.init_contract(&admin);
+    let (_lessor, _lessee, lease_id, _) = setup_lease_in_storage(&env, &contract_id);
+
+    // Simulate lease expiration by advancing time
+    let new_timestamp = env.ledger().timestamp() + 86400 * 31; // 31 days later
+    env.ledger().set_timestamp(new_timestamp);
+
+    // Test auto-renewal
+    client.auto_renew_lease(&lease_id);
+
+    let renewed_lease = client.get_lease_by_id(&lease_id).unwrap();
+    assert!(renewed_lease.status == LeaseState::Renewed);
+
+    // Check history
+    let history = client.get_lease_history(&lease_id);
+    assert!(history.len() >= 2);
+    assert_eq!(
+        history.get(1).unwrap().action,
+        String::from_str(&env, "auto_renewed")
+    );
+}
+
+#[test]
+fn test_lease_deposit_calculation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Marketplace);
+    let client = MarketplaceClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.init_contract(&admin);
+    let (_lessor, lessee, lease_id, _) = setup_lease_in_storage(&env, &contract_id);
+
+    // Set payment token
+    let token_address = Address::generate(&env);
+    client.set_payment_token(&admin, &token_address);
+
+    let lease = client.get_lease_by_id(&lease_id).unwrap();
+
+    // Advance time by half the lease duration
+    let half_duration = lease.duration_seconds / 2;
+    let new_timestamp = lease.start_time + half_duration;
+    env.ledger().set_timestamp(new_timestamp);
+
+    // Test lease deposit calculation
+    let expected_deposit = (lease.total_value * 1000) / 10000; // 10% of total value
+    assert_eq!(lease.deposit_amount, expected_deposit);
+}
+
+#[test]
+#[should_panic(expected = "Invalid lease ID")]
+fn test_invalid_lease_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Marketplace);
+    let client = MarketplaceClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.init_contract(&admin);
+
+    client.get_lease_by_id(&0); // Should panic with invalid lease ID
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_unauthorized_extension_request() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Marketplace);
+    let client = MarketplaceClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.init_contract(&admin);
+    let (lessor, _lessee, lease_id, _) = setup_lease_in_storage(&env, &contract_id);
+
+    // Try to request extension as lessor (should fail)
+    client.request_lease_extension(&lease_id, &lessor, &3600);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_unauthorized_extension_approval() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Marketplace);
+    let client = MarketplaceClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.init_contract(&admin);
+    let (_lessor, lessee, lease_id, _) = setup_lease_in_storage(&env, &contract_id);
+
+    // Request extension as lessee
+    let extension_id = client.request_lease_extension(&lease_id, &lessee, &3600);
+
+    // Try to approve as lessee (should fail)
+    client.approve_lease_extension(&lease_id, &extension_id, &lessee);
+}
+
+#[test]
+fn test_prorated_termination_penalty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, Marketplace);
+    let client = MarketplaceClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    client.init_contract(&admin);
+    let (_lessor, lessee, lease_id, _) = setup_lease_in_storage(&env, &contract_id);
+
+    // Set payment token for termination fee processing
+    let token_address = Address::generate(&env);
+    client.set_payment_token(&admin, &token_address);
+
+    let lease = client.get_lease_by_id(&lease_id).unwrap();
+
+    // Advance time by half the lease duration
+    let half_duration = lease.duration_seconds / 2;
+    let new_timestamp = lease.start_time + half_duration;
+    env.ledger().set_timestamp(new_timestamp);
+
+    // Calculate expected penalty (20% of remaining value)
+    // Since we're halfway through, remaining value is half of total
+    let remaining_value = lease.total_value / 2;
+    let expected_penalty = (remaining_value * 2000) / 10000; // Default 20% penalty
+
+    client.early_termination(&lease_id, &lessee, &expected_penalty);
+
+    let terminated_lease = client.get_lease_by_id(&lease_id).unwrap();
+    assert!(terminated_lease.status == LeaseState::Terminated);
 }

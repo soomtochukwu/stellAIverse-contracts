@@ -1,3 +1,4 @@
+use soroban_sdk::{contracttype, Address, Bytes, Map, String, Symbol, Val, Vec};
 use soroban_sdk::{contracttype, Address, Bytes, String, Symbol, Val, Vec, Map};
 
 /// Oracle data entry
@@ -477,14 +478,13 @@ pub struct VerifiableCredential {
     pub id: String,
     pub credential_id: u64,
     pub issuer: Address,
-    pub subject: String,  // DID of the subject
+    pub subject: String, // DID of the subject
     pub credential_type: Vec<String>,
     pub credential_schema: String,
     pub credential_status: CredentialStatus,
     pub issuance_date: u64,
     pub expiration_date: Option<u64>,
     pub credential_subject: Map<String, String>,
-    pub proof: Option<VCProof>,
     pub non_revoked: bool,
     pub created_at: u64,
     pub updated_at: u64,
@@ -645,10 +645,10 @@ pub struct ReputationReview {
     pub review_id: u64,
     pub reviewer_did: String,
     pub subject_did: String,
-    pub rating: u32,  // 1-5 stars
+    pub rating: u32, // 1-5 stars
     pub category: String,
     pub comment: Option<String>,
-    pub evidence: Vec<String>,  // Credential IDs as evidence
+    pub evidence: Vec<String>, // Credential IDs as evidence
     pub created_at: u64,
     pub verified: bool,
 }

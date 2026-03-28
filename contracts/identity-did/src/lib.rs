@@ -1,10 +1,10 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, Env,
-    Map, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, Env, Map,
+    String, Symbol, Vec,
 };
-use stellai_lib::{audit, admin, validation};
+use stellai_lib::{admin, audit, validation};
 
 // DID Document structure following W3C DID specification
 #[derive(Clone, Debug)]
@@ -238,11 +238,16 @@ impl DIDContract {
         services: Vec<Service>,
     ) -> Result<String, Error> {
         // Validate inputs
-        Self::validate_create_did_inputs(env.clone(), &controller, &verification_methods, &services)?;
+        Self::validate_create_did_inputs(
+            env.clone(),
+            &controller,
+            &verification_methods,
+            &services,
+        )?;
 
         // Generate DID
         let did = Self::generate_did(env.clone(), &controller);
-        
+
         // Create DID document
         let now = env.ledger().timestamp();
         let mut auth: Vec<String> = Vec::new(&env);
@@ -256,6 +261,10 @@ impl DIDContract {
             did: did.clone(),
             controller: controller.clone(),
             verification_methods: verification_methods.clone(),
+            authentication: verification_methods
+                .iter()
+                .map(|vm| vm.id.clone())
+                .collect(),
             authentication: auth,
             assertion_method: Vec::new(&env),
             key_agreement: Vec::new(&env),
@@ -275,6 +284,13 @@ impl DIDContract {
             last_activity: now,
         };
 
+        // Store DID record
+        env.storage().instance().set(&DID_REGISTRY, &did, &record);
+
+        // Store controller mapping
+        env.storage()
+            .instance()
+            .set(&CONTROLLER_MAPPING, &controller, &did);
         // Store DID record (use tuple key)
         let reg_key = (DID_REGISTRY, did.clone());
         env.storage().instance().set(&reg_key, &record);
@@ -293,11 +309,22 @@ impl DIDContract {
             new_version: 1,
             reason: None,
         };
-        
+
         // Store history
         Self::add_to_history(env.clone(), did.clone(), history);
 
         // Emit event
+        env.events().publish(
+            (Symbol::new(&env, "DIDCreated"), &did),
+            DIDCreatedEvent {
+                did: did.clone(),
+                controller,
+                timestamp: now,
+            },
+        );
+
+        // Audit log
+        audit::log_action(env, "create_did", &did, &controller, now, None);
         env.events().publish((Symbol::new(&env, "DIDCreated"),), DIDCreatedEvent { did: did.clone(), controller: controller.clone(), timestamp: now });
 
         // Record audit log (use create_audit_log from lib::audit)
@@ -318,6 +345,8 @@ impl DIDContract {
         Self::validate_did_ownership(env.clone(), &did, &controller)?;
 
         // Get current record
+        let mut record = Self::get_did_record(env.clone(), &did)?;
+
         let mut record = Self::get_did_record(env.clone(), did.clone())?;
         
         // Check if DID is active
@@ -328,12 +357,18 @@ impl DIDContract {
         // Update document
         let now = env.ledger().timestamp();
         let old_version = record.document.version_id;
-        
+
         if let Some(new_vms) = verification_methods {
             if new_vms.len() > MAX_VERIFICATION_METHODS {
                 return Err(Error::MaxVerificationMethodsExceeded);
             }
             record.document.verification_methods = new_vms;
+            record.document.authentication = record
+                .document
+                .verification_methods
+                .iter()
+                .map(|vm| vm.id.clone())
+                .collect();
             // Rebuild authentication list
             let mut auth: Vec<String> = Vec::new(&env);
             for i in 0..record.document.verification_methods.len() {
@@ -370,11 +405,23 @@ impl DIDContract {
             new_version: record.document.version_id,
             reason: None,
         };
-        
+
         // Store history
         Self::add_to_history(env.clone(), did.clone(), history);
 
         // Emit event
+        env.events().publish(
+            (Symbol::new(&env, "DIDUpdated"), &did),
+            DIDUpdatedEvent {
+                did: did.clone(),
+                version_id: record.document.version_id,
+                updated_by: controller,
+                timestamp: now,
+            },
+        );
+
+        // Audit log
+        audit::log_action(env, "update_did", &did, &controller, now, None);
         env.events().publish((Symbol::new(&env, "DIDUpdated"),), DIDUpdatedEvent { did: did.clone(), version_id: record.document.version_id, updated_by: controller.clone(), timestamp: now });
 
         let _ = audit::create_audit_log(&env, controller.clone(), audit::OperationType::ConfigurationChange, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""), Some(String::from_str(&env, "update_did")));
@@ -383,18 +430,15 @@ impl DIDContract {
     }
 
     /// Suspend a DID
-    pub fn suspend_did(
-        env: Env,
-        did: String,
-        admin: Address,
-        reason: String,
-    ) -> Result<(), Error> {
+    pub fn suspend_did(env: Env, did: String, admin: Address, reason: String) -> Result<(), Error> {
         // Validate admin authorization
         if admin::verify_admin(&env, &admin).is_err() {
             return Err(Error::Unauthorized);
         }
 
         // Get current record
+        let mut record = Self::get_did_record(env.clone(), &did)?;
+
         let mut record = Self::get_did_record(env.clone(), did.clone())?;
         
         // Check if DID can be suspended
@@ -424,11 +468,23 @@ impl DIDContract {
             new_version: record.document.version_id,
             reason: Some(reason.clone()),
         };
-        
+
         // Store history
         Self::add_to_history(env.clone(), did.clone(), history);
 
         // Emit event
+        env.events().publish(
+            (Symbol::new(&env, "DIDSuspended"), &did),
+            DIDSuspendedEvent {
+                did: did.clone(),
+                suspended_by: admin,
+                reason: reason.clone(),
+                timestamp: now,
+            },
+        );
+
+        // Audit log
+        audit::log_action(env, "suspend_did", &did, &admin, now, Some(reason));
         env.events().publish((Symbol::new(&env, "DIDSuspended"),), DIDSuspendedEvent { did: did.clone(), suspended_by: admin.clone(), reason: reason.clone(), timestamp: now });
 
         let _ = audit::create_audit_log(&env, admin.clone(), audit::OperationType::ConfigurationChange, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""), Some(String::from_str(&env, "suspend_did")));
@@ -437,6 +493,13 @@ impl DIDContract {
     }
 
     /// Revoke a DID
+    pub fn revoke_did(env: Env, did: String, admin: Address, reason: String) -> Result<(), Error> {
+        // Validate admin authorization
+        admin::require_admin(env.clone(), &admin)?;
+
+        // Get current record
+        let mut record = Self::get_did_record(env.clone(), &did)?;
+
     pub fn revoke_did(
         env: Env,
         did: String,
@@ -474,11 +537,23 @@ impl DIDContract {
             new_version: record.document.version_id,
             reason: Some(reason.clone()),
         };
-        
+
         // Store history
         Self::add_to_history(env.clone(), did.clone(), history);
 
         // Emit event
+        env.events().publish(
+            (Symbol::new(&env, "DIDRevoked"), &did),
+            DIDRevokedEvent {
+                did: did.clone(),
+                revoked_by: admin,
+                reason: reason.clone(),
+                timestamp: now,
+            },
+        );
+
+        // Audit log
+        audit::log_action(env, "revoke_did", &did, &admin, now, Some(reason));
         env.events().publish((Symbol::new(&env, "DIDRevoked"),), DIDRevokedEvent { did: did.clone(), revoked_by: admin.clone(), reason: reason.clone(), timestamp: now });
 
         let _ = audit::create_audit_log(&env, admin.clone(), audit::OperationType::ConfigurationChange, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""), Some(String::from_str(&env, "revoke_did")));
@@ -487,6 +562,13 @@ impl DIDContract {
     }
 
     /// Reactivate a suspended DID
+    pub fn reactivate_did(env: Env, did: String, admin: Address) -> Result<(), Error> {
+        // Validate admin authorization
+        admin::require_admin(env.clone(), &admin)?;
+
+        // Get current record
+        let mut record = Self::get_did_record(env.clone(), &did)?;
+
     pub fn reactivate_did(
         env: Env,
         did: String,
@@ -523,11 +605,22 @@ impl DIDContract {
             new_version: record.document.version_id,
             reason: None,
         };
-        
+
         // Store history
         Self::add_to_history(env.clone(), did.clone(), history);
 
         // Emit event
+        env.events().publish(
+            (Symbol::new(&env, "DIDReactivated"), &did),
+            DIDReactivatedEvent {
+                did: did.clone(),
+                reactivated_by: admin,
+                timestamp: now,
+            },
+        );
+
+        // Audit log
+        audit::log_action(env, "reactivate_did", &did, &admin, now, None);
         env.events().publish((Symbol::new(&env, "DIDReactivated"),), DIDReactivatedEvent { did: did.clone(), reactivated_by: admin.clone(), timestamp: now });
 
         let _ = audit::create_audit_log(&env, admin.clone(), audit::OperationType::ConfigurationChange, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""), Some(String::from_str(&env, "reactivate_did")));
@@ -550,6 +643,10 @@ impl DIDContract {
 
     /// Get DID by controller
     pub fn get_did_by_controller(env: Env, controller: Address) -> Result<String, Error> {
+        let did: Option<String> = env
+            .storage()
+            .instance()
+            .get(&CONTROLLER_MAPPING, &controller);
         let key = (CONTROLLER_MAPPING, controller.clone());
         let did: Option<String> = env.storage().instance().get(&key);
         did.ok_or(Error::DIDNotFound)
@@ -559,6 +656,20 @@ impl DIDContract {
     pub fn get_did_history(env: Env, did: String, limit: u32) -> Result<Vec<DIDHistory>, Error> {
         let history_key = (DID_HISTORY, did.clone());
         let history: Option<Vec<DIDHistory>> = env.storage().instance().get(&history_key);
+
+        match history {
+            Some(h) => {
+                let effective_limit = if limit > MAX_HISTORY_SIZE {
+                    MAX_HISTORY_SIZE
+                } else {
+                    limit
+                };
+                let end = if h.len() > effective_limit as usize {
+                    effective_limit as usize
+                } else {
+                    h.len()
+                };
+                Ok(h.slice(0, end))
         match history {
             Some(h) => {
                 let effective_limit = if limit > MAX_HISTORY_SIZE { MAX_HISTORY_SIZE } else { limit };
@@ -628,13 +739,18 @@ impl DIDContract {
 
     fn validate_service(service: &Service) -> Result<(), Error> {
         // Basic validation for service
-        if service.id.is_empty() || service.type_.is_empty() || service.service_endpoint.is_empty() {
+        if service.id.is_empty() || service.type_.is_empty() || service.service_endpoint.is_empty()
+        {
             return Err(Error::InvalidService);
         }
 
         Ok(())
     }
 
+    fn is_supported_key_type(key_type: &str) -> bool {
+        key_type == "Ed25519VerificationKey2018"
+            || key_type == "EcdsaSecp256k1VerificationKey2019"
+            || key_type == "X25519KeyAgreementKey2019"
     fn is_supported_key_type(env: &Env, key_type: &String) -> bool {
         let k1 = String::from_str(env, "Ed25519VerificationKey2018");
         let k2 = String::from_str(env, "EcdsaSecp256k1VerificationKey2019");
@@ -660,15 +776,21 @@ impl DIDContract {
 
     fn add_to_history(env: Env, did: String, history: DIDHistory) {
         let history_key = (DID_HISTORY, did.clone());
+        let mut history_list: Vec<DIDHistory> = env
+            .storage()
+            .instance()
+            .get(&history_key)
+            .unwrap_or(Vec::new(&env));
+
         let mut history_list: Vec<DIDHistory> = env.storage().instance().get(&history_key).unwrap_or(Vec::new(&env));
         
         history_list.push_front(history);
-        
+
         // Keep only recent history
         if history_list.len() > MAX_HISTORY_SIZE {
             history_list.pop_back();
         }
-        
+
         env.storage().instance().set(&history_key, &history_list);
     }
 }
