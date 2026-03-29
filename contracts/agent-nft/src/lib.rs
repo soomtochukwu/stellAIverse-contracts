@@ -627,6 +627,12 @@ impl AgentNFT {
                 return Err(ContractError::InvalidInput);
             }
             seen_cids.push_back(agent.metadata_cid.clone());
+
+            Self::validate_agent_data(&env, &agent.name, &agent.metadata_cid, &agent.capabilities)?;
+
+            if let OptionalRoyaltyInfo::Some(royalty) = agent.royalty {
+                Self::validate_royalty_fee(royalty.fee)?;
+            }
         }
 
         // 4. Execution Logic
@@ -667,7 +673,6 @@ impl AgentNFT {
 
             // Handle Royalty if present
             if let OptionalRoyaltyInfo::Some(royalty) = data.royalty {
-                Self::validate_royalty_fee(royalty.fee)?;
                 let royalty_key = Self::get_royalty_key(&env, agent_id);
                 env.storage().instance().set(&royalty_key, &royalty);
             }

@@ -1,5 +1,4 @@
 use soroban_sdk::{contracttype, Address, Bytes, Map, String, Symbol, Val, Vec};
-use soroban_sdk::{contracttype, Address, Bytes, String, Symbol, Val, Vec, Map};
 
 /// Oracle data entry
 #[derive(Clone, Debug)]
@@ -520,7 +519,7 @@ pub struct VerifiableCredential {
     pub id: String,
     pub credential_id: u64,
     pub issuer: Address,
-    pub subject: String,  // DID of the subject
+    pub subject: String, // DID of the subject
     pub credential_type: Vec<String>,
     pub credential_schema: String,
     pub credential_status: CredentialStatus,
