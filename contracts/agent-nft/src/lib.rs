@@ -1,5 +1,4 @@
 #![no_std]
-extern crate alloc;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 mod test;
 
@@ -860,6 +859,7 @@ impl AgentNFT {
 // ============================================================================
 #[cfg(test)]
 pub mod tests {
+    extern crate alloc;
     use super::*;
     use soroban_sdk::{testutils::Address as _, Env};
 

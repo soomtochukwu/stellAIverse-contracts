@@ -167,6 +167,7 @@ pub enum OptionalRoyaltyInfo {
 pub enum AuctionType {
     English = 0,
     Dutch = 1,
+    Sealed = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -234,6 +235,14 @@ pub struct SealedReveal {
     pub amount: i128,
     pub nonce: String,
     pub deposit: i128,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BidRecord {
+    pub bidder: Address,
+    pub amount: i128,
     pub timestamp: u64,
 }
 

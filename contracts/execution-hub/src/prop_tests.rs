@@ -12,9 +12,7 @@ mod prop_tests {
     use crate::{ExecutionHub, ExecutionHubClient};
     use proptest::prelude::*;
     use soroban_sdk::{
-        contract, contractimpl,
-        testutils::Address as _,
-        Address, Bytes, Env, String,
+        contract, contractimpl, testutils::Address as _, Address, Bytes, Env, String,
     };
 
     // ── minimal mock AgentNFT ─────────────────────────────────────────────────
@@ -48,7 +46,13 @@ mod prop_tests {
         (client, admin, nft)
     }
 
-    fn exec(env: &Env, client: &ExecutionHubClient, agent_id: u64, executor: &Address, nonce: u64) -> u64 {
+    fn exec(
+        env: &Env,
+        client: &ExecutionHubClient,
+        agent_id: u64,
+        executor: &Address,
+        nonce: u64,
+    ) -> u64 {
         let action = String::from_str(env, "act");
         let params = Bytes::from_array(env, &[1u8]);
         let hash = Bytes::from_array(env, &nonce.to_be_bytes());
