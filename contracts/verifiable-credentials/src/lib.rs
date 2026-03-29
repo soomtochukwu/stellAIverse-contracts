@@ -19,7 +19,7 @@ pub struct VerifiableCredential {
     pub issuance_date: u64,
     pub expiration_date: Option<u64>,
     pub credential_subject: Map<String, String>,
-    pub proof: Option<Proof>,
+    pub proof: OptionalProof,
     pub non_revoked: bool,
     pub created_at: u64,
     pub updated_at: u64,
@@ -48,6 +48,13 @@ pub struct Proof {
     pub challenge: Option<String>,
     pub domain: Option<String>,
     pub jws: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+#[contracttype]
+pub enum OptionalProof {
+    None,
+    Some(Proof),
 }
 
 #[derive(Clone, Debug)]
@@ -119,7 +126,7 @@ pub struct Presentation {
     pub presentation_id: u64,
     pub holder: String, // DID of the holder
     pub verifiable_credential: Vec<VerifiableCredential>,
-    pub proof: Option<Proof>,
+    pub proof: OptionalProof,
     pub created_at: u64,
     pub expires_at: Option<u64>,
 }
@@ -443,7 +450,7 @@ impl VerifiableCredentialsContract {
             issuance_date: now,
             expiration_date,
             credential_subject: credential_subject.clone(),
-            proof: None,
+            proof: OptionalProof::None,
             non_revoked: true,
             created_at: now,
             updated_at: now,

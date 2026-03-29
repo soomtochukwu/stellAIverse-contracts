@@ -46,8 +46,6 @@ fn test_create_did_success() {
 
         let services = Vec::from_array(&env, [service1]);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -102,14 +100,6 @@ fn test_create_did_already_exists() {
         let services = Vec::new(&env);
 
         // Create first DID
-        let did1 = client.create_did(&controller, &verification_methods, &services);
-
-        // Try to create another DID for same controller - should fail
-        let result = client.try_create_did(&controller, &verification_methods, &services);
-        contractassert!(result.is_err());
-        contractassert!(
-            result.unwrap_err() == RawError::from_contract_error(Error::DIDAlreadyExists)
-        );
         let did1 = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -158,8 +148,6 @@ fn test_update_did_success() {
         let verification_methods = Vec::from_array(&env, [vm1]);
         let services = Vec::new(&env);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -179,19 +167,6 @@ fn test_update_did_success() {
 
         let new_verification_methods = Vec::from_array(&env, [vm2]);
 
-        // Update DID
-        let new_version =
-            client.update_did(&did, &controller, Some(&new_verification_methods), None);
-
-        // Verify update
-        contractassert!(new_version == 2);
-
-        let document = client.get_did_document(&did);
-        contractassert!(document.version_id == 2);
-        contractassert!(document.verification_methods.len() == 1);
-        contractassert!(
-            document.verification_methods.get(0).unwrap().id == String::from_str(&env, "key-2")
-        );
         let new_version = DIDContract::update_did(
             env.clone(),
             did.clone(),
@@ -242,13 +217,6 @@ fn test_update_did_unauthorized() {
         let verification_methods = Vec::from_array(&env, [vm1]);
         let services = Vec::new(&env);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
-
-        // Try to update DID with unauthorized address - should fail
-        let result = client.try_update_did(&did, &unauthorized, None, None);
-        contractassert!(result.is_err());
-        contractassert!(result.unwrap_err() == RawError::from_contract_error(Error::Unauthorized));
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -293,8 +261,6 @@ fn test_suspend_did_success() {
         let verification_methods = Vec::from_array(&env, [vm1]);
         let services = Vec::new(&env);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -346,8 +312,6 @@ fn test_revoke_did_success() {
         let verification_methods = Vec::from_array(&env, [vm1]);
         let services = Vec::new(&env);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -397,18 +361,6 @@ fn test_reactivate_did_success() {
         let verification_methods = Vec::from_array(&env, [vm1]);
         let services = Vec::new(&env);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
-
-        // Suspend DID
-        client.suspend_did(
-            &did,
-            &admin,
-            &String::from_str(&env, "Suspension for investigation"),
-        );
-
-        // Reactivate DID
-        client.reactivate_did(&did, &admin);
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -458,8 +410,6 @@ fn test_get_did_by_controller() {
         let verification_methods = Vec::from_array(&env, [vm1]);
         let services = Vec::new(&env);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -501,8 +451,6 @@ fn test_is_valid_did() {
         let verification_methods = Vec::from_array(&env, [vm1]);
         let services = Vec::new(&env);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
@@ -515,11 +463,6 @@ fn test_is_valid_did() {
         let is_valid = DIDContract::is_valid_did(env.clone(), did.clone()).unwrap();
         assert!(is_valid);
 
-        // Suspend DID and check validity
-        client.suspend_did(&did, &admin, &String::from_str(&env, "Test suspension"));
-
-        let is_valid_after_suspension = client.is_valid_did(&did);
-        contractassert!(!is_valid_after_suspension);
         DIDContract::suspend_did(
             env.clone(),
             did.clone(),
@@ -560,8 +503,6 @@ fn test_get_did_history() {
         let verification_methods = Vec::from_array(&env, [vm1]);
         let services = Vec::new(&env);
 
-        // Create DID
-        let did = client.create_did(&controller, &verification_methods, &services);
         let did = DIDContract::create_did(
             env.clone(),
             controller.clone(),
